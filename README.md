@@ -108,7 +108,8 @@ All thresholds are in [`config.py`](config.py):
 | `ALERT_SCORE_THRESHOLD` | 5 | Minimum score to emit an alert |
 | `CLUSTER_MIN_WALLETS` | 3 | Wallets required to trigger a cluster warning |
 | `CLUSTER_WINDOW_HOURS` | 24 | Time window for cluster detection |
-| `GEOPOLITICAL_KEYWORDS` | *(see config.py)* | Keywords used to identify relevant markets |
+| `GEOPOLITICAL_KEYWORDS` | *(see config.py)* | Keywords for armed conflict, military operations, and political instability markets |
+| `INVESTIGATION_KEYWORDS` | *(see config.py)* | Keywords for crypto investigations, regulatory actions, and financial misconduct markets |
 
 ## Project structure
 
