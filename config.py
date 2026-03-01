@@ -68,12 +68,40 @@ GEOPOLITICAL_KEYWORDS: list[str] = [
     "sanctions",
     "troops",
     "hostage",
-    "troops",
     "airstr",    # covers "airstrike", "airstrikes"
     "ground troops",
     "naval",
     "siege",
     "annexed",
+    "drone",
+    "ballistic",
+    "blockade",
+    "embargo",
+    "mobiliz",   # covers "mobilize", "mobilization"
+    "escalat",   # covers "escalate", "escalation"
+    "withdraw",  # covers "withdrawal"
+    "rebel",
+    "insurgent",
+    "terrorist",
+    "martial law",
+    "state of emergency",
+    "referendum",
+    "impeach",
+    "prime minister",
+    "dictator",
+    "uprising",
+    "occupied",
+    "sovereignty",
+    "secession",
+    "independence",
+    "diplomat",  # covers "diplomatic", "diplomacy"
+    "treaty",
+    "warship",
+    "frontline",
+    "provocat",  # covers "provocation", "provocative"
+    "detonат",
+    "chemical weapon",
+    "biological weapon",
 ]
 
 # ── PolygonScan rate limit ────────────────────────────────────────────────────

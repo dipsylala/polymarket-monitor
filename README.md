@@ -70,7 +70,9 @@ Each invocation covers all activity since the last run — designed to be called
   Market : US strikes Iran by February 28, 2026?
   Reasons: new_wallet(27d), funded_24h, single_market, low_odds($0.11/share), large_bet($61,000)
   Trade  : 560,680 YES shares @ $0.108  | USDC spent: $60,553  | Potential profit: $500,127
-  tx     : 0xd22c...
+  Wallet : https://polygonscan.com/address/0xABCD...1234
+  tx     : https://polygonscan.com/tx/0xd22c...
+  Market : https://polymarket.com/event/us-strikes-iran-february-2026
 ======================================================================
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
