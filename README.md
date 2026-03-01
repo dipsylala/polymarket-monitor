@@ -21,19 +21,20 @@ On-chain wallet age and funding recency are verified via the [PolygonScan API](h
 
 ## Setup
 
-**Requirements:** Python 3.9+
+**Requirements:** Python 3.9+, [uv](https://docs.astral.sh/uv/)
 
 ```powershell
+# Install uv (once, globally)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
 # 1. Clone / navigate to the project
-cd E:\Github\PolymarketPoll
+cd E:\Github\PolymarketMonitor
 
-# 2. Create and activate a virtual environment
-python -m venv .venv
-.venv\Scripts\Activate.ps1   # PowerShell
-# or: source .venv/bin/activate  (bash/zsh)
+# 2. Create a virtual environment
+uv venv .venv
 
-# 3. Install dependencies
-pip install -r requirements.txt
+# 3. Install dependencies (uv auto-discovers .venv — no activation needed)
+uv pip install -r requirements.txt
 
 # 4. Configure
 cp .env.example .env
