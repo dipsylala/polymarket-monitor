@@ -40,7 +40,7 @@ cp .env.example .env
 # Edit .env and add your POLYGONSCAN_API_KEY
 ```
 
-Get a free PolygonScan API key at https://polygonscan.com/apis. Without it the app still runs, but wallet age and funding checks are skipped (lower max score).
+Get a free PolygonScan API key at [https://polygonscan.com/apis](https://polygonscan.com/apis). Without it the app still runs, but wallet age and funding checks are skipped (lower max score).
 
 ## Usage
 

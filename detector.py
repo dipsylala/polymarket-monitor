@@ -115,6 +115,18 @@ def score_wallet(
         reasons.append(f"large_bet(${usdc_spent:,.0f})")
 
     result = ScoreResult(score=score, reasons=reasons)
+
+    # Require at least one trade-quality signal (low odds or large bet).
+    # A new/freshly-funded wallet betting at high odds (near-certainty) is not
+    # informative — it carries no directional edge, just confirmation of the consensus.
+    trade_quality_signals = {"low_odds", "large_bet"}
+    if not any(r.startswith(tuple(trade_quality_signals)) for r in reasons):
+        logger.debug(
+            "Wallet %s suppressed — no trade-quality signal (price=%.3f, usdc=%.0f)",
+            address[:10] + "...", trade_price, trade_price * trade_size,
+        )
+        return ScoreResult(score=0, reasons=["suppressed_no_trade_quality"])
+
     logger.debug(
         "Scored wallet %s: %d %s",
         address[:10] + "...",
