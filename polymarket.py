@@ -152,6 +152,9 @@ def get_wallet_trade_history(address: str) -> tuple[int, int]:
                 params={"maker": address, "limit": page_size, "offset": offset},
                 timeout=15,
             )
+            if resp.status_code == 400:
+                logger.debug("Data API pagination limit reached for wallet %s at offset=%d", address, offset)
+                break
             resp.raise_for_status()
         except requests.RequestException as exc:
             logger.error("Data API error fetching wallet trades for %s: %s", address, exc)

@@ -43,6 +43,7 @@ def _setup_logging() -> None:
 def _format_alert(trade: dict, result: detector.ScoreResult) -> str:
     address = trade.get("proxyWallet", "")
     question = trade.get("title", trade.get("conditionId", "unknown market"))
+    slug = trade.get("slug", "")
     price = float(trade.get("price", 0))
     size = float(trade.get("size", 0))
     usdc_spent = price * size
@@ -50,6 +51,10 @@ def _format_alert(trade: dict, result: detector.ScoreResult) -> str:
     tx_hash = trade.get("transactionHash", "n/a")
     reasons_str = ", ".join(result.reasons)
     short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
+
+    wallet_url = f"https://polygonscan.com/address/{address}"
+    tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
+    market_url = f"https://polymarket.com/event/{slug}" if slug else ""
 
     return (
         f"\n{'='*70}\n"
@@ -59,8 +64,10 @@ def _format_alert(trade: dict, result: detector.ScoreResult) -> str:
         f"  Trade  : {size:,.0f} YES shares @ ${price:.3f}  "
         f"| USDC spent: ${usdc_spent:,.0f}  "
         f"| Potential profit: ${potential_profit:,.0f}\n"
-        f"  tx     : {tx_hash}\n"
-        f"{'='*70}"
+        f"  Wallet : {wallet_url}\n"
+        f"  tx     : {tx_url}\n"
+        + (f"  Market : {market_url}\n" if market_url else "")
+        + f"{'='*70}"
     )
 
 
