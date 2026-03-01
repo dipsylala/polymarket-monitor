@@ -104,10 +104,12 @@ def _create_github_issue(title: str, body: str) -> None:
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
-            json={"title": title, "body": body, "labels": ["alert"]},
+            json={"title": title, "body": body},
             timeout=15,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            logger.warning("Failed to create GitHub issue: %s %s", resp.status_code, resp.text)
+            return
         logger.info("Created GitHub issue: %s", resp.json().get("html_url"))
     except requests.RequestException as exc:
         logger.warning("Failed to create GitHub issue: %s", exc)
