@@ -19,8 +19,11 @@ Windows Task Scheduler:
 """
 
 import logging
+import os
 import sys
 import time
+
+import requests
 
 import config
 import database
@@ -29,6 +32,85 @@ import polygon
 import polymarket
 
 logger = logging.getLogger(__name__)
+
+
+def _write_step_summary(alerts_data: list, clusters_data: list) -> None:
+    """Write a markdown job summary to the GitHub Actions step summary file."""
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+
+    lines: list[str] = []
+    if not alerts_data and not clusters_data:
+        lines.append("## Polymarket Monitor — No alerts this run\n")
+    else:
+        lines.append(f"## Polymarket Monitor — {len(alerts_data)} alert(s), {len(clusters_data)} cluster(s)\n")
+
+        if alerts_data:
+            lines.append("### Alerts\n")
+            for trade, result in alerts_data:
+                address = trade.get("proxyWallet", "")
+                question = trade.get("title", trade.get("conditionId", "unknown market"))
+                slug = trade.get("slug", "")
+                price = float(trade.get("price", 0))
+                size = float(trade.get("size", 0))
+                usdc_spent = price * size
+                potential_profit = size - usdc_spent
+                tx_hash = trade.get("transactionHash", "n/a")
+                short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
+                reasons_str = ", ".join(result.reasons)
+                wallet_url = f"https://polygonscan.com/address/{address}"
+                tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
+                market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+                lines.append(
+                    f"**Score {result.score} — [{short_addr}]({wallet_url})**  \n"
+                    f"Market: {question}  \n"
+                    f"Reasons: `{reasons_str}`  \n"
+                    f"Trade: {size:,.0f} YES shares @ ${price:.3f} "
+                    f"| USDC spent: ${usdc_spent:,.0f} "
+                    f"| Potential profit: ${potential_profit:,.0f}  \n"
+                    f"[Transaction]({tx_url})"
+                    + (f" | [Market]({market_url})" if market_url else "")
+                    + "\n"
+                )
+
+        if clusters_data:
+            lines.append("### Clusters\n")
+            for question, wallets in clusters_data:
+                links = ", ".join(
+                    f"[{w[:6]}...{w[-4:]}](https://polygonscan.com/address/{w})" for w in wallets
+                )
+                lines.append(
+                    f"**{len(wallets)} wallets on same market within {config.CLUSTER_WINDOW_HOURS}h**  \n"
+                    f"Market: {question}  \n"
+                    f"Wallets: {links}\n"
+                )
+
+    with open(summary_path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+
+
+def _create_github_issue(title: str, body: str) -> None:
+    """Open a GitHub Issue via the Actions GITHUB_TOKEN. No-ops outside of Actions."""
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not token or not repo:
+        return
+    try:
+        resp = requests.post(
+            f"https://api.github.com/repos/{repo}/issues",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={"title": title, "body": body, "labels": ["alert"]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        logger.info("Created GitHub issue: %s", resp.json().get("html_url"))
+    except requests.RequestException as exc:
+        logger.warning("Failed to create GitHub issue: %s", exc)
 
 
 def _setup_logging() -> None:
@@ -117,6 +199,8 @@ def run_scan() -> None:
 
     # ── Step 4: Score each trade ──────────────────────────────────────────────
     alerted_conditions: set[str] = set()
+    alerts_data: list[tuple[dict, detector.ScoreResult]] = []
+    clusters_data: list[tuple[str, list[str]]] = []
 
     for trade in new_trades:
         address: str = trade.get("proxyWallet", "")
@@ -169,6 +253,7 @@ def run_scan() -> None:
         if result and result.is_alert:
             print(_format_alert(trade, result))
             alerted_conditions.add(condition_id)
+            alerts_data.append((trade, result))
 
     # ── Step 5: Cluster detection ─────────────────────────────────────────────
     for condition_id in alerted_conditions:
@@ -189,10 +274,54 @@ def run_scan() -> None:
                 f"  → Possible coordinated insider activity\n"
                 f"{'!'*70}"
             )
+            clusters_data.append((question, cluster_wallets))
 
     # ── Step 6: Advance last_scanned_at for all markets ─────────────────────
     for cid in condition_ids:
         database.set_market_last_scanned(cid, scan_start)
+
+    # ── Step 7: GitHub Actions output ────────────────────────────────────────
+    _write_step_summary(alerts_data, clusters_data)
+
+    for trade, result in alerts_data:
+        address = trade.get("proxyWallet", "")
+        short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
+        tx_hash = trade.get("transactionHash", "n/a")
+        question = trade.get("title", trade.get("conditionId", "unknown market"))
+        slug = trade.get("slug", "")
+        price = float(trade.get("price", 0))
+        size = float(trade.get("size", 0))
+        usdc_spent = price * size
+        potential_profit = size - usdc_spent
+        reasons_str = ", ".join(result.reasons)
+        wallet_url = f"https://polygonscan.com/address/{address}"
+        tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
+        market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+        body = (
+            f"**Score:** {result.score}  \n"
+            f"**Wallet:** [{short_addr}]({wallet_url})  \n"
+            f"**Signals:** `{reasons_str}`  \n\n"
+            f"| Field | Value |\n|---|---|\n"
+            f"| Market | {question} |\n"
+            f"| Shares | {size:,.0f} YES @ ${price:.3f} |\n"
+            f"| USDC spent | ${usdc_spent:,.0f} |\n"
+            f"| Potential profit | ${potential_profit:,.0f} |\n"
+            f"| Transaction | [{tx_hash[:16]}...]({tx_url}) |\n"
+            + (f"| Polymarket | [View market]({market_url}) |\n" if market_url else "")
+        )
+        _create_github_issue(f"[Alert] Score={result.score} {short_addr} — {question}", body)
+
+    for question, wallets in clusters_data:
+        wallet_links = "\n".join(
+            f"- [{w[:6]}...{w[-4:]}](https://polygonscan.com/address/{w})" for w in wallets
+        )
+        body = (
+            f"**{len(wallets)} flagged wallets** traded the same market within "
+            f"{config.CLUSTER_WINDOW_HOURS}h — possible coordinated insider activity.  \n\n"
+            f"**Market:** {question}  \n\n"
+            f"**Wallets:**  \n{wallet_links}\n"
+        )
+        _create_github_issue(f"[Cluster] {len(wallets)} wallets — {question}", body)
 
     logger.info(
         "── Scan complete. %d trades processed, %d alerts ──",
