@@ -3,8 +3,7 @@
 .venv/
 venv/
 
-# Database (runtime state — not source)
-*.db
+# Database WAL temp files (the .db itself is committed for CI state persistence)
 *.db-shm
 *.db-wal
 
