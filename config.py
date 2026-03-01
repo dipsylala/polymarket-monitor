@@ -106,6 +106,14 @@ GEOPOLITICAL_KEYWORDS: list[str] = [
     "detonат",
     "chemical weapon",
     "biological weapon",
+    "resign",
+    "ousted",
+    "step down",
+    "removed from office",
+    "out by",        # covers "Maduro out by ...", "Leader X out by ..."
+    "no longer",     # covers "no longer president/in power"
+    "deposed",
+    "exile",
 ]
 
 # ── Investigation / financial misconduct keywords ─────────────────────────────
