@@ -50,6 +50,14 @@ python main.py
 
 Each invocation covers all activity since the last run — designed to be called by a scheduler rather than kept running.
 
+## Tests
+
+```powershell
+python -m pytest tests/ -v
+```
+
+The test suite covers the three known insider-trading incident profiles (US-Iran strike, Venezuela/Maduro, ZachXBT/Axiom) as true positives, plus true negatives for high-odds bets, established wallets, and the keyword market filter.
+
 ### Cron (Linux/macOS)
 
 ```cron

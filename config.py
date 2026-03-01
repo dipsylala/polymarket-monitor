@@ -48,6 +48,10 @@ CLUSTER_MIN_WALLETS: int = 3
 CLUSTER_WINDOW_HOURS: int = 24
 
 # ── Geopolitical market keywords ──────────────────────────────────────────────
+# Catches markets around armed conflict, military operations, political
+# instability, and international crises where advance government or
+# intelligence knowledge could confer a trading edge (e.g. US-Iran strikes,
+# coup attempts, nuclear escalation).
 # Case-insensitive substring match against the market `question` field.
 GEOPOLITICAL_KEYWORDS: list[str] = [
     "strike",
@@ -102,6 +106,39 @@ GEOPOLITICAL_KEYWORDS: list[str] = [
     "detonат",
     "chemical weapon",
     "biological weapon",
+]
+
+# ── Investigation / financial misconduct keywords ─────────────────────────────
+# Catches markets around crypto investigations, regulatory actions, and
+# corporate misconduct where insider knowledge is plausible (e.g. ZachXBT,
+# SEC enforcement, fraud allegations).
+INVESTIGATION_KEYWORDS: list[str] = [
+    "zachxbt",
+    "investigat",    # covers "investigate", "investigation"
+    "expose",
+    "insider trading",
+    "fraud",
+    "sec ",          # trailing space avoids "second", "secret" etc.
+    "cftc",
+    "doj",
+    "enforcement",
+    "lawsuit",
+    "indicted",
+    "arrested",
+    "charged with",
+    "ponzi",
+    "hack",
+    "exploit",
+    "rug pull",
+    "exit scam",
+    "bankrupt",
+    "insolvent",
+    "fine",
+    "settlement",
+    "whistleblow",   # covers "whistleblower", "whistleblowing"
+    "subpoena",
+    "money laundering",
+    "sanction",      # also catches financial sanctions
 ]
 
 # ── PolygonScan rate limit ────────────────────────────────────────────────────

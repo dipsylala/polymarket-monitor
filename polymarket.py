@@ -50,7 +50,8 @@ def get_geopolitical_markets() -> list[dict]:
 
         for market in page:
             question: str = market.get("question", "").lower()
-            if any(kw in question for kw in config.GEOPOLITICAL_KEYWORDS):
+            if any(kw in question for kw in config.GEOPOLITICAL_KEYWORDS) or \
+               any(kw in question for kw in config.INVESTIGATION_KEYWORDS):
                 markets.append(market)
 
         if len(page) < page_size:
