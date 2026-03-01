@@ -9,7 +9,8 @@ POLYGONSCAN_API_KEY: str = os.getenv("POLYGONSCAN_API_KEY", "")
 # ── API base URLs ─────────────────────────────────────────────────────────────
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 DATA_API_URL = "https://data-api.polymarket.com"
-POLYGONSCAN_API_URL = "https://api.polygonscan.com/api"
+POLYGONSCAN_API_URL = "https://api.etherscan.io/v2/api"
+POLYGONSCAN_CHAIN_ID = "137"  # Polygon Mainnet
 
 # USDC on Polygon
 USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"

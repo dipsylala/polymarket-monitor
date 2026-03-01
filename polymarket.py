@@ -85,6 +85,10 @@ def get_recent_trades(since_ts: int, condition_ids: set[str]) -> list[dict]:
                 params={"limit": page_size, "offset": offset},
                 timeout=15,
             )
+            if resp.status_code == 400:
+                # API caps pagination; no more results available at this offset
+                logger.debug("Data API pagination limit reached at offset=%d", offset)
+                break
             resp.raise_for_status()
         except requests.RequestException as exc:
             logger.error("Data API error fetching trades: %s", exc)

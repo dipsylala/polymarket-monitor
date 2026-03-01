@@ -42,6 +42,7 @@ def _get(params: dict) -> Optional[dict]:
 
     _throttle()
     params["apikey"] = config.POLYGONSCAN_API_KEY
+    params["chainid"] = config.POLYGONSCAN_CHAIN_ID
 
     try:
         resp = _SESSION.get(config.POLYGONSCAN_API_URL, params=params, timeout=15)
