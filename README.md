@@ -1,7 +1,4 @@
-# PolymarketPoll
-
-Monitors the [Polymarket](https://polymarket.com) prediction market API for suspicious trading activity on geopolitical markets — patterns consistent with insider knowledge, as documented in the [February 2026 US-Iran strike incident](https://www.ibtimes.co.uk/suspected-insider-trading-polymarket-us-iran-1782274).
-
+# Polymarket Monitor
 ## How it works
 
 Each run fetches all YES trades on geopolitical markets since the previous run and scores the wallets behind them across six signals:
