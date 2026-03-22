@@ -114,6 +114,31 @@ GEOPOLITICAL_KEYWORDS: list[str] = [
     "no longer",     # covers "no longer president/in power"
     "deposed",
     "exile",
+    # ── Iran-specific ─────────────────────────────────────────────────────────
+    "iran",
+    "tehran",
+    "irgc",
+    "khamenei",
+    "mojtaba",
+    "hormuz",
+    "khomeini",
+    "rouhani",
+    "pezeshkian",
+    # ── Ukraine / Russia-specific ─────────────────────────────────────────────
+    "ukraine",
+    "russia",
+    "zelensky",
+    "zelenskyy",
+    "putin",
+    "kyiv",
+    "nato",
+    "crimea",
+    "donbas",
+    "kharkiv",
+    "zaporizhzhia",
+    "mariupol",
+    "kursk",
+    "bakhmut",
 ]
 
 # ── Investigation / financial misconduct keywords ─────────────────────────────
@@ -147,6 +172,25 @@ INVESTIGATION_KEYWORDS: list[str] = [
     "subpoena",
     "money laundering",
     "sanction",      # also catches financial sanctions
+]
+
+# ── US Airport / airspace keywords ──────────────────────────────────────────
+# Catches markets around attacks, closures, or restrictions affecting US
+# airports and domestic airspace — an area where advance knowledge of a
+# security incident or military action would confer a trading edge.
+AIRPORT_KEYWORDS: list[str] = [
+    "airport",
+    "airspace",
+    "no-fly zone",
+    "no fly zone",
+    "faa ",          # trailing space avoids "affair", "faan", etc.
+    "flight ban",
+    "airfield",
+    "tsa",           # Transportation Security Administration
+    "grounded",      # covers FAA ground stops
+    "ground stop",
+    "air traffic",
+    "aviation",
 ]
 
 # ── PolygonScan rate limit ────────────────────────────────────────────────────

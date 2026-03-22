@@ -577,5 +577,194 @@ class TestGeopoliticalKeywords(unittest.TestCase):
         self.assertFalse(self._matches("Will Taylor Swift release a new album in 2026?"))
 
 
+# ── Iran named-entity keyword tests ──────────────────────────────────────────
+
+class TestIranNamedEntityKeywords(unittest.TestCase):
+    """
+    Verify that Iran-specific named entities are matched even when the question
+    does not include generic terms like 'strike' or 'nuclear'.
+    """
+
+    def _geo_match(self, question: str) -> bool:
+        q = question.lower()
+        return any(kw in q for kw in config.GEOPOLITICAL_KEYWORDS)
+
+    def test_plain_iran(self):
+        self.assertTrue(self._geo_match("Will Iran retaliate against US forces by April 2026?"))
+
+    def test_tehran(self):
+        self.assertTrue(self._geo_match("Will Tehran be targeted in a military operation?"))
+
+    def test_irgc(self):
+        self.assertTrue(self._geo_match("Will the IRGC launch a new proxy attack in 2026?"))
+
+    def test_khamenei(self):
+        self.assertTrue(self._geo_match("Will Khamenei call a national emergency by June 2026?"))
+
+    def test_mojtaba_first_name(self):
+        self.assertTrue(self._geo_match("Will Mojtaba consolidate power as Supreme Leader?"))
+
+    def test_strait_of_hormuz(self):
+        self.assertTrue(self._geo_match("Will the Strait of Hormuz be closed to oil tankers in 2026?"))
+
+    def test_pezeshkian(self):
+        self.assertTrue(self._geo_match("Will Pezeshkian survive as Iranian president through 2026?"))
+
+    def test_unrelated_not_matched(self):
+        # 'iran' must not accidentally match e.g. "brainstorm" or "Ukraine" variants
+        self.assertFalse(self._geo_match("Who wins the 2026 FIFA World Cup?"))
+
+
+# ── Ukraine / Russia named-entity keyword tests ───────────────────────────────
+
+class TestUkraineRussiaKeywords(unittest.TestCase):
+    """
+    Verify that Ukraine- and Russia-specific named entities are matched even
+    when generic terms like 'war' or 'invasion' are absent from the question.
+    """
+
+    def _geo_match(self, question: str) -> bool:
+        q = question.lower()
+        return any(kw in q for kw in config.GEOPOLITICAL_KEYWORDS)
+
+    def test_ukraine(self):
+        self.assertTrue(self._geo_match("Will Ukraine receive F-16s from European allies by May 2026?"))
+
+    def test_russia(self):
+        self.assertTrue(self._geo_match("Will Russia deploy tactical nuclear weapons before July 2026?"))
+
+    def test_zelensky(self):
+        self.assertTrue(self._geo_match("Will Zelensky remain president of Ukraine through 2026?"))
+
+    def test_zelenskyy_alt_spelling(self):
+        self.assertTrue(self._geo_match("Will Zelenskyy sign a ceasefire agreement in 2026?"))
+
+    def test_putin(self):
+        self.assertTrue(self._geo_match("Will Putin be removed from power by 2027?"))
+
+    def test_kyiv(self):
+        self.assertTrue(self._geo_match("Will Kyiv be under missile attack in Q2 2026?"))
+
+    def test_nato(self):
+        self.assertTrue(self._geo_match("Will a NATO Article 5 response be triggered in 2026?"))
+
+    def test_crimea(self):
+        self.assertTrue(self._geo_match("Will Ukraine recapture Crimea by end of 2026?"))
+
+    def test_donbas(self):
+        self.assertTrue(self._geo_match("Will Donbas be fully under Ukrainian control by 2027?"))
+
+    def test_zaporizhzhia(self):
+        self.assertTrue(self._geo_match("Will the Zaporizhzhia nuclear plant be shut down in 2026?"))
+
+    def test_kursk(self):
+        self.assertTrue(self._geo_match("Will Ukrainian forces hold territory in Kursk through March 2026?"))
+
+    def test_unrelated_not_matched(self):
+        self.assertFalse(self._geo_match("Will Bitcoin reach $200k in 2026?"))
+
+
+# ── Airport / airspace keyword tests ─────────────────────────────────────────
+
+class TestAirportKeywords(unittest.TestCase):
+    """
+    Verify that US airport and airspace market questions are caught by
+    AIRPORT_KEYWORDS, and that unrelated markets are excluded.
+    """
+
+    def _matches_all(self, question: str) -> bool:
+        q = question.lower()
+        return (
+            any(kw in q for kw in config.GEOPOLITICAL_KEYWORDS)
+            or any(kw in q for kw in config.INVESTIGATION_KEYWORDS)
+            or any(kw in q for kw in config.AIRPORT_KEYWORDS)
+        )
+
+    def test_us_airport_attack(self):
+        self.assertTrue(self._matches_all("Will a US airport be attacked or shut down in 2026?"))
+
+    def test_no_fly_zone_hyphen(self):
+        self.assertTrue(self._matches_all("Will the FAA declare a no-fly zone over a major US city?"))
+
+    def test_no_fly_zone_space(self):
+        self.assertTrue(self._matches_all("Will Congress authorize a no fly zone over a conflict zone?"))
+
+    def test_faa_ground_stop(self):
+        self.assertTrue(self._matches_all("Will the FAA issue a nationwide ground stop in 2026?"))
+
+    def test_tsa_security_incident(self):
+        self.assertTrue(self._matches_all("Will TSA detect a major security breach at a US airport?"))
+
+    def test_airspace_closure(self):
+        self.assertTrue(self._matches_all("Will US airspace be partially closed due to a military event?"))
+
+    def test_aviation_disruption(self):
+        self.assertTrue(self._matches_all("Will a major aviation disruption affect US travel in 2026?"))
+
+    def test_grounded_fleet(self):
+        self.assertTrue(self._matches_all("Will US airlines be grounded due to a national security threat?"))
+
+    def test_air_traffic_control(self):
+        self.assertTrue(self._matches_all("Will air traffic control systems be disrupted in 2026?"))
+
+    # True negatives — airport-adjacent words that should NOT match
+    def test_sports_not_matched(self):
+        self.assertFalse(self._matches_all("Who will win the 2026 Super Bowl?"))
+
+    def test_crypto_not_matched(self):
+        self.assertFalse(self._matches_all("Will Ethereum hit $10k in 2026?"))
+
+    def test_flight_in_unrelated_context_not_matched(self):
+        # "flight" alone is not in AIRPORT_KEYWORDS — only "flight ban"
+        self.assertFalse(self._matches_all("Will Elon Musk's Mars flight launch in 2026?"))
+
+
+# ── Ukraine war scoring profile ───────────────────────────────────────────────
+
+class TestUkraineWarScoringProfile(unittest.TestCase):
+    """
+    Hypothetical new wallet making a large low-odds bet on a Ukraine ceasefire
+    market hours after the Kursk incursion was publicly reported but before
+    confirmation. Wallet: 5 days old, funded 12h ago, 0 prior trades, 1 market.
+    ~$45,000 at $0.09/share (500,000 shares).
+    Expected: score=12, is_alert=True.
+    """
+
+    def setUp(self):
+        self.result = score_wallet(
+            address="0xDADA0000dada0000dada0000dada0000dada0000",
+            trade_price=0.09,
+            trade_size=500_000,       # ~$45,000 USDC
+            first_tx_ts=_days_ago(5),
+            last_funded_ts=_hours_ago(12),
+            prior_trade_count=0,
+            distinct_markets=1,
+        )
+
+    def test_is_alert(self):
+        self.assertTrue(self.result.is_alert)
+
+    def test_score(self):
+        self.assertEqual(self.result.score, 12)
+
+    def test_new_wallet_signal(self):
+        self.assertTrue(any(r.startswith("new_wallet") for r in self.result.reasons))
+
+    def test_funded_signal(self):
+        self.assertTrue(any(r.startswith("funded_") for r in self.result.reasons))
+
+    def test_low_history_signal(self):
+        self.assertTrue(any(r.startswith("low_history") for r in self.result.reasons))
+
+    def test_single_market_signal(self):
+        self.assertIn("single_market", self.result.reasons)
+
+    def test_low_odds_signal(self):
+        self.assertTrue(any(r.startswith("low_odds") for r in self.result.reasons))
+
+    def test_large_bet_signal(self):
+        self.assertTrue(any(r.startswith("large_bet") for r in self.result.reasons))
+
+
 if __name__ == "__main__":
     unittest.main()
