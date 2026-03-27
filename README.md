@@ -14,6 +14,8 @@ Each run fetches all YES trades on geopolitical markets since the previous run a
 
 Wallets scoring **≥ 5** are printed as alerts. If **3 or more** flagged wallets hit the same market within 24 hours, a cluster warning is emitted.
 
+In parallel, every run checks a **watchlist** of known insider-trading wallets (`WATCHLIST_WALLETS` in `config.py`). Any trade from a watchlist address on *any* market triggers an immediate alert regardless of score. On the first scan of a newly added wallet, the previous 4 months of trades are backfilled automatically.
+
 On-chain wallet age and funding recency are verified via the [PolygonScan API](https://polygonscan.com/apis) (free tier).
 
 ## Setup
@@ -89,7 +91,19 @@ The test suite covers the three known insider-trading incident profiles (US-Iran
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ```
 
-All alerts are also persisted to `polymarket_monitor.db` (SQLite).
+Watchlist hits produce a distinct block:
+
+```plaintext
+**********************************************************************
+[WATCHLIST HIT] Known insider active: 0xe31b...fb7 (ZachXBT/Axiom incident Feb 2026)
+  Market : Will ZachXBT expose a major exchange by March 2026?
+  Trade  : 10,000 YES shares @ $0.350 (BUY) | USDC: $3,500
+  Wallet : https://polygonscan.com/address/0xe31b...
+  tx     : https://polygonscan.com/tx/0xabc1...
+**********************************************************************
+```
+
+All alerts and watchlist hits are also persisted to `polymarket_monitor.db` (SQLite).
 
 ## Configuration
 
@@ -108,6 +122,7 @@ All thresholds are in [`config.py`](config.py):
 | `CLUSTER_WINDOW_HOURS` | 24 | Time window for cluster detection |
 | `GEOPOLITICAL_KEYWORDS` | *(see config.py)* | Keywords for armed conflict, military operations, and political instability markets |
 | `INVESTIGATION_KEYWORDS` | *(see config.py)* | Keywords for crypto investigations, regulatory actions, and financial misconduct markets |
+| `WATCHLIST_WALLETS` | *(see config.py)* | Known insider wallets; any trade triggers an immediate alert. New entries backfill 4 months of history on first scan. |
 
 ## Project structure
 
@@ -116,8 +131,9 @@ main.py          Entry point + scan orchestrator
 polymarket.py    Gamma API + Data API clients
 polygon.py       PolygonScan wallet age/funding checks
 detector.py      Scoring model + cluster detection
-database.py      SQLite persistence
-config.py        All thresholds and settings
+database.py      SQLite persistence (markets, trades, wallets, alerts,
+                 watchlist_wallets, watchlist_hits)
+config.py        All thresholds, keywords, and watchlist
 ```
 
 ## Disclaimer

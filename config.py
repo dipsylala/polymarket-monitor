@@ -196,3 +196,13 @@ AIRPORT_KEYWORDS: list[str] = [
 # ── PolygonScan rate limit ────────────────────────────────────────────────────
 # Free tier allows 5 req/s; stay safely below.
 POLYGONSCAN_REQ_PER_SEC: float = 4.0
+
+# ── Watchlist wallets ─────────────────────────────────────────────────────────
+# Known insider-trading wallets identified from proven incidents.
+# Any trade from these addresses on ANY market triggers an immediate alert,
+# regardless of the scoring model.
+# Keys are wallet addresses; values are human-readable labels for alerts.
+WATCHLIST_WALLETS: dict[str, str] = {
+    "0xe31b852756937aef6a047b8de0d36196804b3fb7": "ZachXBT/Axiom incident Feb 2026 (Lookonchain)",
+    "0x110edef01810239c23307ad3d4373e48bc9e8b11": "US-Iran strike market Feb/Mar 2026",
+}

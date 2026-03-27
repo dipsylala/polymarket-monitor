@@ -76,6 +76,29 @@ def init_db() -> None:
                 ON alerts(condition_id);
             CREATE INDEX IF NOT EXISTS idx_alerts_wallet
                 ON alerts(wallet_address);
+
+            -- Watchlist: known insider-trading wallets to track across all markets
+            CREATE TABLE IF NOT EXISTS watchlist_wallets (
+                address         TEXT PRIMARY KEY,
+                label           TEXT NOT NULL,
+                last_scanned_at INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS watchlist_hits (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_address  TEXT NOT NULL,
+                condition_id    TEXT NOT NULL,
+                tx_hash         TEXT UNIQUE,
+                side            TEXT,
+                outcome         TEXT,
+                size            REAL,
+                price           REAL,
+                timestamp       INTEGER,
+                created_at      INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_watchlist_hits_wallet
+                ON watchlist_hits(wallet_address);
         """)
 
 
@@ -200,3 +223,60 @@ def get_recent_alerts(condition_id: str, since_ts: int) -> list[sqlite3.Row]:
             SELECT * FROM alerts
             WHERE condition_id = ? AND created_at >= ?
         """, (condition_id, since_ts)).fetchall()
+
+
+# ── Watchlist ─────────────────────────────────────────────────────────────────
+
+def sync_watchlist(wallets: list[tuple[str, str]]) -> None:
+    """
+    Ensure every (address, label) pair in `wallets` exists in watchlist_wallets.
+    Does not remove entries that are no longer in config (preserves history).
+    """
+    with _connect() as conn:
+        conn.executemany("""
+            INSERT OR IGNORE INTO watchlist_wallets (address, label)
+            VALUES (?, ?)
+        """, wallets)
+
+
+def get_watchlist_last_scanned(address: str) -> int:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT last_scanned_at FROM watchlist_wallets WHERE address = ?",
+            (address,)
+        ).fetchone()
+    return row["last_scanned_at"] if row else 0
+
+
+def set_watchlist_last_scanned(address: str, ts: int) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE watchlist_wallets SET last_scanned_at = ? WHERE address = ?",
+            (ts, address)
+        )
+
+
+def watchlist_hit_exists(tx_hash: str) -> bool:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM watchlist_hits WHERE tx_hash = ?", (tx_hash,)
+        ).fetchone()
+    return row is not None
+
+
+def insert_watchlist_hit(
+    wallet_address: str,
+    condition_id: str,
+    tx_hash: str,
+    side: str,
+    outcome: str,
+    size: float,
+    price: float,
+    timestamp: int,
+) -> None:
+    with _connect() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO watchlist_hits
+                (wallet_address, condition_id, tx_hash, side, outcome, size, price, timestamp, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (wallet_address, condition_id, tx_hash, side, outcome, size, price, timestamp, int(time.time())))

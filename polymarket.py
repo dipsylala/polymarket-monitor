@@ -180,3 +180,52 @@ def get_wallet_trade_history(address: str) -> tuple[int, int]:
         offset += page_size
 
     return total, len(markets)
+
+
+def get_watchlist_recent_trades(address: str, since_ts: int) -> list[dict]:
+    """
+    Return all trades by `address` since `since_ts`, across any market.
+    Unlike get_recent_trades, no keyword or condition_id filtering is applied —
+    watchlisted wallets are monitored on every market they touch.
+    """
+    results: list[dict] = []
+    offset = 0
+    page_size = 500
+    exhausted = False
+
+    while not exhausted:
+        try:
+            resp = _SESSION.get(
+                f"{config.DATA_API_URL}/trades",
+                params={"maker": address, "limit": page_size, "offset": offset},
+                timeout=15,
+            )
+            if resp.status_code == 400:
+                logger.debug(
+                    "Data API pagination limit for watchlist wallet %s at offset=%d",
+                    address, offset,
+                )
+                break
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            logger.error("Data API error fetching watchlist trades for %s: %s", address, exc)
+            break
+
+        page: list[dict] = resp.json()
+        if not page:
+            break
+
+        for trade in page:
+            ts = trade.get("timestamp", 0)
+            if ts < since_ts:
+                exhausted = True
+                break
+            results.append(trade)
+
+        if len(page) < page_size:
+            break
+
+        offset += page_size
+
+    logger.debug("Found %d watchlist trades for %s since ts=%d", len(results), address[:10] + "...", since_ts)
+    return results

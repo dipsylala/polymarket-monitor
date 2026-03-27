@@ -34,17 +34,20 @@ import polymarket
 logger = logging.getLogger(__name__)
 
 
-def _write_step_summary(alerts_data: list, clusters_data: list) -> None:
+def _write_step_summary(alerts_data: list, clusters_data: list, watchlist_hits_data: list) -> None:
     """Write a markdown job summary to the GitHub Actions step summary file."""
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
         return
 
     lines: list[str] = []
-    if not alerts_data and not clusters_data:
+    if not alerts_data and not clusters_data and not watchlist_hits_data:
         lines.append("## Polymarket Monitor — No alerts this run\n")
     else:
-        lines.append(f"## Polymarket Monitor — {len(alerts_data)} alert(s), {len(clusters_data)} cluster(s)\n")
+        lines.append(
+            f"## Polymarket Monitor — {len(alerts_data)} alert(s), "
+            f"{len(clusters_data)} cluster(s), {len(watchlist_hits_data)} watchlist hit(s)\n"
+        )
 
         if alerts_data:
             lines.append("### Alerts\n")
@@ -86,6 +89,33 @@ def _write_step_summary(alerts_data: list, clusters_data: list) -> None:
                     f"Wallets: {links}\n"
                 )
 
+        if watchlist_hits_data:
+            lines.append("### Watchlist Hits\n")
+            for trade in watchlist_hits_data:
+                address = trade.get("proxyWallet", "")
+                label = trade.get("_watchlist_label", "known insider")
+                question = trade.get("title", trade.get("conditionId", "unknown market"))
+                slug = trade.get("slug", "")
+                price = float(trade.get("price", 0))
+                size = float(trade.get("size", 0))
+                usdc_spent = price * size
+                tx_hash = trade.get("transactionHash", "n/a")
+                side = trade.get("side", "?")
+                outcome = trade.get("outcome", "?")
+                short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
+                wallet_url = f"https://polygonscan.com/address/{address}"
+                tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
+                market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+                lines.append(
+                    f"**[WATCHLIST] [{short_addr}]({wallet_url})** — {label}  \n"
+                    f"Market: {question}  \n"
+                    f"Trade: {size:,.0f} {outcome} shares @ ${price:.3f} ({side})"
+                    f" | USDC: ${usdc_spent:,.0f}  \n"
+                    f"[Transaction]({tx_url})"
+                    + (f" | [Market]({market_url})" if market_url else "")
+                    + "\n"
+                )
+
     with open(summary_path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
 
@@ -121,6 +151,37 @@ def _setup_logging() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
+    )
+
+
+def _format_watchlist_hit(trade: dict) -> str:
+    address = trade.get("proxyWallet", "")
+    label = trade.get("_watchlist_label", "known insider")
+    question = trade.get("title", trade.get("conditionId", "unknown market"))
+    slug = trade.get("slug", "")
+    price = float(trade.get("price", 0))
+    size = float(trade.get("size", 0))
+    usdc_spent = price * size
+    tx_hash = trade.get("transactionHash", "n/a")
+    side = trade.get("side", "?")
+    outcome = trade.get("outcome", "?")
+    short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
+
+    wallet_url = f"https://polygonscan.com/address/{address}"
+    tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
+    market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+
+    return (
+        f"\n{'*'*70}\n"
+        f"[WATCHLIST HIT] Known insider active: {short_addr} ({label})\n"
+        f"  Market : {question}\n"
+        f"  Trade  : {size:,.0f} {outcome} shares @ ${price:.3f}  "
+        f"| USDC spent: ${usdc_spent:,.0f}  "
+        f"| Side: {side}\n"
+        f"  Wallet : {wallet_url}\n"
+        f"  tx     : {tx_url}\n"
+        + (f"  Market : {market_url}\n" if market_url else "")
+        + f"{'*'*70}"
     )
 
 
@@ -166,6 +227,9 @@ def run_scan() -> None:
     """
     scan_start = int(time.time())
     logger.info("── Scan started at %s ──", time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(scan_start)))
+
+    # ── Step 0: Sync watchlist wallets from config ────────────────────────────
+    database.sync_watchlist(list(config.WATCHLIST_WALLETS.items()))
 
     # ── Step 1: Refresh market list ───────────────────────────────────────────
     geo_markets = polymarket.get_geopolitical_markets()
@@ -282,8 +346,37 @@ def run_scan() -> None:
     for cid in condition_ids:
         database.set_market_last_scanned(cid, scan_start)
 
-    # ── Step 7: GitHub Actions output ────────────────────────────────────────
-    _write_step_summary(alerts_data, clusters_data)
+    # ── Step 7: Watchlist scan ────────────────────────────────────────────────
+    watchlist_hits_data: list[dict] = []
+    for address, label in config.WATCHLIST_WALLETS.items():
+        wl_since = database.get_watchlist_last_scanned(address) or (scan_start - 10_368_000)  # 4 months
+        wl_trades = polymarket.get_watchlist_recent_trades(address, wl_since)
+        new_wl_trades = [t for t in wl_trades if not database.watchlist_hit_exists(t.get("transactionHash", ""))]
+        if new_wl_trades:
+            logger.info(
+                "Watchlist wallet %s (%s): %d new trade(s) detected",
+                address[:10] + "...", label, len(new_wl_trades),
+            )
+        for trade in new_wl_trades:
+            tx_hash = trade.get("transactionHash", "")
+            database.insert_watchlist_hit(
+                wallet_address=address,
+                condition_id=trade.get("conditionId", ""),
+                tx_hash=tx_hash,
+                side=trade.get("side", ""),
+                outcome=trade.get("outcome", ""),
+                size=float(trade.get("size", 0)),
+                price=float(trade.get("price", 0)),
+                timestamp=int(trade.get("timestamp", scan_start)),
+            )
+            enriched = dict(trade)
+            enriched["_watchlist_label"] = label
+            print(_format_watchlist_hit(enriched))
+            watchlist_hits_data.append(enriched)
+        database.set_watchlist_last_scanned(address, scan_start)
+
+    # ── Step 8: GitHub Actions output ────────────────────────────────────────
+    _write_step_summary(alerts_data, clusters_data, watchlist_hits_data)
 
     for trade, result in alerts_data:
         address = trade.get("proxyWallet", "")
@@ -325,10 +418,37 @@ def run_scan() -> None:
         )
         _create_github_issue(f"[Cluster] {len(wallets)} wallets — {question}", body)
 
+    for trade in watchlist_hits_data:
+        address = trade.get("proxyWallet", "")
+        label = trade.get("_watchlist_label", "known insider")
+        short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
+        tx_hash = trade.get("transactionHash", "n/a")
+        question = trade.get("title", trade.get("conditionId", "unknown market"))
+        slug = trade.get("slug", "")
+        price = float(trade.get("price", 0))
+        size = float(trade.get("size", 0))
+        usdc_spent = price * size
+        side = trade.get("side", "?")
+        outcome = trade.get("outcome", "?")
+        wallet_url = f"https://polygonscan.com/address/{address}"
+        tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
+        market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+        body = (
+            f"**Known insider wallet active:** [{short_addr}]({wallet_url}) — {label}  \n\n"
+            f"| Field | Value |\n|---|---|\n"
+            f"| Market | {question} |\n"
+            f"| Shares | {size:,.0f} {outcome} @ ${price:.3f} ({side}) |\n"
+            f"| USDC spent | ${usdc_spent:,.0f} |\n"
+            f"| Transaction | [{tx_hash[:16]}...]({tx_url}) |\n"
+            + (f"| Polymarket | [View market]({market_url}) |\n" if market_url else "")
+        )
+        _create_github_issue(f"[Watchlist] {short_addr} — {question}", body)
+
     logger.info(
-        "── Scan complete. %d trades processed, %d alerts ──",
+        "── Scan complete. %d trades processed, %d alerts, %d watchlist hits ──",
         len(new_trades),
         len(alerted_conditions),
+        len(watchlist_hits_data),
     )
 
 
