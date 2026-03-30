@@ -142,7 +142,7 @@ def get_recent_trades(since_ts: int, condition_ids: set[str]) -> list[dict]:
 def get_wallet_trade_history(address: str) -> tuple[int, int]:
     """
     Return (total_trade_count, distinct_market_count) for a given proxy wallet.
-    Uses the Data API `trades` endpoint filtered by maker address.
+    Uses the Data API `trades` endpoint filtered by user address.
     """
     total = 0
     markets: set[str] = set()
@@ -153,7 +153,7 @@ def get_wallet_trade_history(address: str) -> tuple[int, int]:
         try:
             resp = _SESSION.get(
                 f"{config.DATA_API_URL}/trades",
-                params={"maker": address, "limit": page_size, "offset": offset},
+                params={"user": address, "limit": page_size, "offset": offset, "takerOnly": "false"},
                 timeout=15,
             )
             if resp.status_code == 400:
@@ -197,7 +197,7 @@ def get_watchlist_recent_trades(address: str, since_ts: int) -> list[dict]:
         try:
             resp = _SESSION.get(
                 f"{config.DATA_API_URL}/trades",
-                params={"maker": address, "limit": page_size, "offset": offset},
+                params={"user": address, "limit": page_size, "offset": offset, "takerOnly": "false"},
                 timeout=15,
             )
             if resp.status_code == 400:

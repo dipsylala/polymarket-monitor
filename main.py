@@ -155,7 +155,7 @@ def _setup_logging() -> None:
 
 
 def _format_watchlist_hit(trade: dict) -> str:
-    address = trade.get("proxyWallet", "")
+    address = trade.get("_watchlist_address") or trade.get("proxyWallet", "")
     label = trade.get("_watchlist_label", "known insider")
     question = trade.get("title", trade.get("conditionId", "unknown market"))
     slug = trade.get("slug", "")
@@ -371,6 +371,7 @@ def run_scan() -> None:
             )
             enriched = dict(trade)
             enriched["_watchlist_label"] = label
+            enriched["_watchlist_address"] = address
             print(_format_watchlist_hit(enriched))
             watchlist_hits_data.append(enriched)
         database.set_watchlist_last_scanned(address, scan_start)
@@ -419,7 +420,7 @@ def run_scan() -> None:
         _create_github_issue(f"[Cluster] {len(wallets)} wallets — {question}", body)
 
     for trade in watchlist_hits_data:
-        address = trade.get("proxyWallet", "")
+        address = trade.get("_watchlist_address") or trade.get("proxyWallet", "")
         label = trade.get("_watchlist_label", "known insider")
         short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
         tx_hash = trade.get("transactionHash", "n/a")
