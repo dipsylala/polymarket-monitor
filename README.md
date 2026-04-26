@@ -139,3 +139,11 @@ config.py        All thresholds, keywords, and watchlist
 ## Disclaimer
 
 This tool is for research and monitoring purposes only. Flagged wallets are anomalies, not confirmed cases of insider trading. All allegations require independent verification.
+
+## 💰 Bounty Contribution
+
+- **Task:** [Alert] Score=7 0xb6c4...6678 — Will BV Borussia 09 Dortmund win on 2026-04-26?
+- **Reward:** $7060
+- **Source:** GitHub-Paid
+- **Date:** 2026-04-27
+
