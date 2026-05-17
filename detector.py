@@ -1,192 +1,127 @@
 """
-detector.py — Wallet anomaly scoring and cluster detection.
-
-Scoring model
--------------
-Each signal contributes points toward a total risk score.
-A wallet that reaches ALERT_SCORE_THRESHOLD is emitted as an alert.
-
-Signal                                  Points
-------                                  ------
-Wallet first tx < WALLET_AGE_DAYS ago     +3
-Last USDC inbound < FUNDING_RECENCY_HOURS +3
-Prior Polymarket trades < LOW_HISTORY      +2
-Only one distinct market ever traded       +2
-Trade price < LOW_ODDS_PRICE               +1
-USDC spent on trade > LARGE_BET_USDC       +1
-                                           --
-Max possible                               12
-
-Cluster detection
------------------
-If CLUSTER_MIN_WALLETS or more distinct wallets each cross the alert threshold
-on the *same* market within CLUSTER_WINDOW_HOURS, a cluster warning is emitted.
+detector.py — Core logic for detecting suspicious trading patterns.
 """
 
-import json
 import logging
-import time
-from dataclasses import dataclass, field
-from typing import Optional
+from typing import Dict, List
 
-import config
+import polymarket
 import database
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
 class ScoreResult:
-    score: int
-    reasons: list[str] = field(default_factory=list)
-
-    @property
-    def is_alert(self) -> bool:
-        return self.score >= config.ALERT_SCORE_THRESHOLD
-
-
-def score_wallet(
-    address: str,
-    trade_price: float,
-    trade_size: float,
-    first_tx_ts: Optional[int],
-    last_funded_ts: Optional[int],
-    prior_trade_count: int,
-    distinct_markets: int,
-) -> ScoreResult:
     """
-    Score a single wallet based on the signals defined in the plan.
-
-    Parameters
-    ----------
-    address          : proxy wallet address (for logging only)
-    trade_price      : price per share of the trade being evaluated (0–1)
-    trade_size       : number of shares bought
-    first_tx_ts      : Unix timestamp of first on-chain transaction
-    last_funded_ts   : Unix timestamp of most recent inbound USDC
-    prior_trade_count: total Polymarket trades (all markets, all time)
-    distinct_markets : number of distinct Polymarket markets ever traded
+    Encapsulates the result of a scoring operation.
     """
-    now = int(time.time())
+    def __init__(self, score: int, signals: List[str]):
+        self.score = score
+        self.signals = signals
+
+    def is_suspicious(self, threshold: int = 7) -> bool:
+        return self.score >= threshold
+
+def analyze_wallet_trading_behavior(wallet: str) -> ScoreResult:
+    """
+    Analyze a wallet's trading history for suspicious signals.
+    """
+    signals = []
     score = 0
-    reasons: list[str] = []
 
-    # ── Signal 1: New wallet ──────────────────────────────────────────────────
-    if first_tx_ts is not None:
-        age_days = (now - first_tx_ts) / 86400
-        if age_days < config.WALLET_AGE_DAYS:
-            score += 3
-            reasons.append(f"new_wallet({int(age_days)}d)")
+    # Fetch wallet history
+    if not database.has_wallet_data(wallet):
+        trades = polymarket.get_wallet_trading_history(wallet, limit=100)
+        database.store_wallet_trades(wallet, trades)
     else:
-        # No on-chain history at all — treat as brand-new
+        trades = database.get_wallet_trades(wallet)
+
+    # Signal: new_wallet(no_history)
+    if len(trades) == 0:
+        signals.append("new_wallet(no_history)")
         score += 3
-        reasons.append("new_wallet(no_history)")
-
-    # ── Signal 2: Recently funded ─────────────────────────────────────────────
-    if last_funded_ts is not None:
-        funded_hours_ago = (now - last_funded_ts) / 3600
-        if funded_hours_ago < config.FUNDING_RECENCY_HOURS:
-            score += 3
-            reasons.append(f"funded_{int(funded_hours_ago)}h_ago")
     else:
-        # Can't determine funding — slight uplift (uncertainty)
-        score += 1
-        reasons.append("funding_unknown")
+        # Signal: low_history(1_trades)
+        if len(trades) < config.MIN_HISTORY_TRADES:
+            signals.append(f"low_history({len(trades)}_trades)")
+            score += 2
 
-    # ── Signal 3: Low trade history ───────────────────────────────────────────
-    if prior_trade_count < config.LOW_HISTORY_TRADES:
-        score += 2
-        reasons.append(f"low_history({prior_trade_count}_trades)")
+        # Signal: single_market
+        market_ids = {t["market"] for t in trades}
+        if len(market_ids) <= config.ALLOWED_MARKETS_PER_WALLET:
+            signals.append("single_market")
+            score += 2
 
-    # ── Signal 4: Single-market trader ───────────────────────────────────────
-    if distinct_markets <= config.SINGLE_MARKET_THRESHOLD:
-        score += 2
-        reasons.append("single_market")
+    # Signal: funding_unknown (cannot trace origin of funds)
+    # We assume we cannot verify funding sources for now
+    signals.append("funding_unknown")
+    score += 1
 
-    # ── Signal 5: Low odds (bet at low probability) ───────────────────────────
-    if trade_price < config.LOW_ODDS_PRICE:
-        score += 1
-        reasons.append(f"low_odds(${trade_price:.2f}/share)")
+    return ScoreResult(score=score, signals=signals)
 
-    # ── Signal 6: Large bet ───────────────────────────────────────────────────
-    usdc_spent = trade_price * trade_size
-    if usdc_spent > config.LARGE_BET_USDC:
-        score += 1
-        reasons.append(f"large_bet(${usdc_spent:,.0f})")
-
-    result = ScoreResult(score=score, reasons=reasons)
-
-    # Require at least one trade-quality signal (low odds or large bet).
-    # A new/freshly-funded wallet betting at high odds (near-certainty) is not
-    # informative — it carries no directional edge, just confirmation of the consensus.
-    trade_quality_signals = {"low_odds", "large_bet"}
-    if not any(r.startswith(tuple(trade_quality_signals)) for r in reasons):
-        logger.debug(
-            "Wallet %s suppressed — no trade-quality signal (price=%.3f, usdc=%.0f)",
-            address[:10] + "...", trade_price, trade_price * trade_size,
-        )
-        return ScoreResult(score=0, reasons=["suppressed_no_trade_quality"])
-
-    logger.debug(
-        "Scored wallet %s: %d %s",
-        address[:10] + "...",
-        score,
-        reasons,
-    )
-    return result
-
-
-def process_trade(trade: dict, wallet_data: dict) -> Optional[ScoreResult]:
+def detect_suspicious_trade(market: dict, trade: dict) -> Dict:
     """
-    Score a trade + its wallet info, persist alert if threshold met,
-    and return the ScoreResult.
-
-    Parameters
-    ----------
-    trade       : dict from Data API (proxyWallet, conditionId, price, size, etc.)
-    wallet_data : dict with keys: first_tx_ts, last_funded_ts, prior_trade_count,
-                  distinct_markets (populated by scheduler from poly + polygonscan)
+    Evaluate a single trade for suspicious activity.
+    Returns alert dict if suspicious, None otherwise.
     """
-    address = trade["proxyWallet"]
-    price = float(trade.get("price", 0))
-    size = float(trade.get("size", 0))
-    condition_id = trade.get("conditionId", "")
-    tx_hash = trade.get("transactionHash", "")
+    market_question = market["question"]
+    price = trade["price"]
+    wallet = trade["trader"]
+    direction = trade["type"]  # "buy" or "sell"
+    shares = trade["quantity"]
 
-    result = score_wallet(
-        address=address,
-        trade_price=price,
-        trade_size=size,
-        first_tx_ts=wallet_data.get("first_tx_ts"),
-        last_funded_ts=wallet_data.get("last_funded_ts"),
-        prior_trade_count=wallet_data.get("prior_trade_count", 0),
-        distinct_markets=wallet_data.get("distinct_markets", 0),
-    )
+    # Only analyze buy orders on YES shares
+    if direction != "buy":
+        return None
 
-    if result.is_alert:
-        database.insert_alert(
-            wallet_address=address,
-            condition_id=condition_id,
-            tx_hash=tx_hash,
-            score=result.score,
-            reasons=json.dumps(result.reasons),
-        )
+    # Focus on low-odds markets
+    if price > config.MIN_SHARE_PRICE_SUSPICIOUS:
+        return None
 
-    database.mark_trade_scored(tx_hash)
-    return result
+    # Analyze wallet
+    wallet_analysis = analyze_wallet_trading_behavior(wallet)
 
+    # Check if this trade exceeds threshold
+    if shares > config.MAX_ALLOWED_NEW_WALLET_SHARES:
+        wallet_analysis.score += 3
+        wallet_analysis.signals.append(f"large_position({shares}_shares)")
 
-def detect_clusters(condition_id: str) -> Optional[list[str]]:
-    """
-    Check whether CLUSTER_MIN_WALLETS or more distinct wallets have been
-    flagged on the same market within CLUSTER_WINDOW_HOURS.
+    # Build alert if suspicious
+    if wallet_analysis.is_suspicious():
+        return {
+            "market": market_question,
+            "wallet": wallet,
+            "shares": f"{shares} YES @ ${price:.3f}",
+            "usdc_spent": round(shares * price, 2),
+            "potential_profit": round(shares * (1 - price), 2),
+            "transaction": trade.get("transaction_hash", "unknown"),
+            "signals": ", ".join(wallet_analysis.signals),
+            "score": wallet_analysis.score,
+        }
 
-    Returns a list of wallet addresses in the cluster if detected, else None.
-    """
-    since_ts = int(time.time()) - config.CLUSTER_WINDOW_HOURS * 3600
-    recent_alerts = database.get_recent_alerts(condition_id, since_ts)
-
-    wallets = list({row["wallet_address"] for row in recent_alerts})
-    if len(wallets) >= config.CLUSTER_MIN_WALLETS:
-        return wallets
     return None
+
+def scan_geopolitical_markets() -> List[Dict]:
+    """
+    Main entry point: scan all geopolitical markets for suspicious trades.
+    """
+    alerts = []
+    markets = polymarket.get_geopolitical_markets()
+
+    for market in markets:
+        market_id = market["id"]
+        logger.debug("Scanning market: %s", market["question"])
+
+        # Fetch recent trades
+        if not database.has_wallet_data(market_id):
+            trades = polymarket.get_trades_for_market(market_id, limit=50)
+            database.store_market_trades(market_id, trades)
+        else:
+            trades = database.get_market_trades(market_id)
+
+        # Analyze each trade
+        for trade in trades:
+            alert = detect_suspicious_trade(market, trade)
+            if alert:
+                alerts.append(alert)
+
+    return alerts
