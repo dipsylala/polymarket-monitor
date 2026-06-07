@@ -15,7 +15,7 @@ Each run fetches all YES trades on geopolitical markets since the previous run a
 
 Wallets scoring **≥ 5** are printed as alerts. If **3 or more** flagged wallets hit the same market within 24 hours, a cluster warning is emitted.
 
-In parallel, every run checks a **watchlist** of known insider-trading wallets (`WATCHLIST_WALLETS` in `config.py`). Any trade from a watchlist address on *any* market triggers an immediate alert regardless of score. On the first scan of a newly added wallet, the previous 4 months of trades are backfilled automatically.
+In parallel, every run checks a **watchlist** of known insider-trading wallets (`WATCHLIST_WALLETS` in `config.py`). Any trade from a watchlist address on *any* market triggers an immediate alert regardless of score. On the first scan of a newly added wallet, the previous 30 days of trades are backfilled automatically.
 
 On-chain wallet age and funding recency are verified on Polygon through
 [Etherscan API V2](https://docs.etherscan.io/etherscan-v2).
@@ -122,7 +122,8 @@ Watchlist hits produce a distinct block:
 **********************************************************************
 ```
 
-All alerts and watchlist hits are also persisted to `polymarket_monitor.db` (SQLite).
+Alerts and the retained 30-day watchlist-hit history are persisted to
+`polymarket_monitor.db` (SQLite).
 
 ## Configuration
 
@@ -140,9 +141,11 @@ All thresholds are in [`config.py`](config.py):
 | `ALERT_SCORE_THRESHOLD` | 5 | Minimum score to emit an alert |
 | `CLUSTER_MIN_WALLETS` | 3 | Wallets required to trigger a cluster warning |
 | `CLUSTER_WINDOW_HOURS` | 24 | Time window for cluster detection |
+| `WATCHLIST_RETENTION_DAYS` | 30 | Watchlist backfill and persisted deduplication history |
+| `DATABASE_COMPACT_THRESHOLD_MB` | 45 | Compact SQLite after pruning above this size |
 | `GEOPOLITICAL_KEYWORDS` | *(see config.py)* | Keywords for armed conflict, military operations, and political instability markets |
 | `INVESTIGATION_KEYWORDS` | *(see config.py)* | Keywords for crypto investigations, regulatory actions, and financial misconduct markets |
-| `WATCHLIST_WALLETS` | *(see config.py)* | Known insider wallets; any trade triggers an immediate alert. New entries backfill 4 months of history on first scan. |
+| `WATCHLIST_WALLETS` | *(see config.py)* | Known insider wallets; any trade triggers an immediate alert. New entries backfill retained history on first scan. |
 
 ## Project structure
 

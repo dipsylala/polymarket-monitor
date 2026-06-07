@@ -11,17 +11,23 @@ alerts        : scored wallets that crossed the alert threshold
 
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 DB_PATH = Path(__file__).parent / "polymarket_monitor.db"
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -280,3 +286,26 @@ def insert_watchlist_hit(
                 (wallet_address, condition_id, tx_hash, side, outcome, size, price, timestamp, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (wallet_address, condition_id, tx_hash, side, outcome, size, price, timestamp, int(time.time())))
+
+
+# ── Maintenance ───────────────────────────────────────────────────────────────
+
+def prune_watchlist_hits(before_ts: int) -> int:
+    """Delete watchlist-hit history older than `before_ts` and return the count."""
+    with _connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM watchlist_hits WHERE timestamp < ?",
+            (before_ts,),
+        )
+        return cursor.rowcount
+
+
+def compact_if_larger_than(max_size_mb: int) -> bool:
+    """VACUUM the database when it exceeds `max_size_mb`; return whether run."""
+    if not DB_PATH.exists() or DB_PATH.stat().st_size <= max_size_mb * 1024 * 1024:
+        return False
+
+    with _connect() as conn:
+        conn.execute("VACUUM")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    return True

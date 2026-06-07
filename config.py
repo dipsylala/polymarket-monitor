@@ -52,6 +52,13 @@ CLUSTER_MIN_WALLETS: int = 3
 # Time window (hours) to check for co-occurring flagged wallets
 CLUSTER_WINDOW_HOURS: int = 24
 
+# ── Database retention ────────────────────────────────────────────────────────
+# Initial watchlist scans and persisted watchlist-hit deduplication history
+WATCHLIST_RETENTION_DAYS: int = 30
+
+# Compact SQLite after pruning only when the file exceeds this size
+DATABASE_COMPACT_THRESHOLD_MB: int = 45
+
 # ── Geopolitical market keywords ──────────────────────────────────────────────
 # Catches markets around armed conflict, military operations, political
 # instability, and international crises where advance government or

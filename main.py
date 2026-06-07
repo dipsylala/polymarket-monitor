@@ -427,7 +427,9 @@ def run_scan() -> None:
     # ── Step 7: Watchlist scan ────────────────────────────────────────────────
     watchlist_hits_data: list[dict] = []
     for address, label in config.WATCHLIST_WALLETS.items():
-        wl_since = database.get_watchlist_last_scanned(address) or (scan_start - 10_368_000)  # 4 months
+        wl_since = database.get_watchlist_last_scanned(address) or (
+            scan_start - config.WATCHLIST_RETENTION_DAYS * 86400
+        )
         wl_trades = polymarket.get_watchlist_recent_trades(address, wl_since)
         new_wl_trades = [t for t in wl_trades if not database.watchlist_hit_exists(t.get("transactionHash", ""))]
         if new_wl_trades:
@@ -526,6 +528,17 @@ def run_scan() -> None:
             + (f"| Polymarket | [View market]({market_url}) |\n" if market_url else "")
         )
         _create_github_issue(f"[Watchlist] {short_addr} — {question}", body)
+
+    retention_cutoff = scan_start - config.WATCHLIST_RETENTION_DAYS * 86400
+    pruned_hits = database.prune_watchlist_hits(retention_cutoff)
+    if pruned_hits:
+        logger.info(
+            "Pruned %d watchlist hits older than %d days",
+            pruned_hits,
+            config.WATCHLIST_RETENTION_DAYS,
+        )
+    if database.compact_if_larger_than(config.DATABASE_COMPACT_THRESHOLD_MB):
+        logger.info("Compacted database after retention cleanup")
 
     logger.info(
         "── Scan complete. %d trades processed, %d alerts, %d watchlist hits ──",
