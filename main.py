@@ -13,8 +13,8 @@ Cron example (every hour):
   0 * * * * /path/to/.venv/bin/python /path/to/main.py >> /var/log/polymarket.log 2>&1
 
 Windows Task Scheduler:
-  Program : E:/Github/PolymarketPoll/.venv/Scripts/python.exe
-  Arguments: E:/Github/PolymarketPoll/main.py
+  Program : E:/Github/polymarket-monitor/.venv/Scripts/python.exe
+  Arguments: E:/Github/polymarket-monitor/main.py
   Trigger  : Daily, repeat every 1 hour
 """
 
@@ -34,6 +34,34 @@ import polymarket
 logger = logging.getLogger(__name__)
 
 
+def _private_alert_routing_enabled() -> bool:
+    """Return whether this Actions run sends alert details to another repo."""
+    target_repo = os.environ.get("ALERT_REPOSITORY", "").strip()
+    source_repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    return (
+        os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+        and bool(target_repo)
+        and target_repo != source_repo
+    )
+
+
+def _validate_alert_routing() -> None:
+    """Fail Actions runs before scanning when private issue routing is incomplete."""
+    if os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
+        return
+
+    missing = [
+        name
+        for name in ("ALERT_REPOSITORY", "ALERT_REPO_TOKEN")
+        if not os.environ.get(name, "").strip()
+    ]
+    if missing:
+        raise RuntimeError(
+            "Private alert routing is not configured; missing "
+            + ", ".join(missing)
+        )
+
+
 def _write_step_summary(alerts_data: list, clusters_data: list, watchlist_hits_data: list) -> None:
     """Write a markdown job summary to the GitHub Actions step summary file."""
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -48,6 +76,14 @@ def _write_step_summary(alerts_data: list, clusters_data: list, watchlist_hits_d
             f"## Polymarket Monitor — {len(alerts_data)} alert(s), "
             f"{len(clusters_data)} cluster(s), {len(watchlist_hits_data)} watchlist hit(s)\n"
         )
+
+        if _private_alert_routing_enabled():
+            lines.append(
+                "Alert details were sent to the configured private alert repository.\n"
+            )
+            with open(summary_path, "a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines))
+            return
 
         if alerts_data:
             lines.append("### Alerts\n")
@@ -121,9 +157,9 @@ def _write_step_summary(alerts_data: list, clusters_data: list, watchlist_hits_d
 
 
 def _create_github_issue(title: str, body: str) -> None:
-    """Open a GitHub Issue via the Actions GITHUB_TOKEN. No-ops outside of Actions."""
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY")
+    """Open an issue in the configured private alert repository."""
+    token = os.environ.get("ALERT_REPO_TOKEN")
+    repo = os.environ.get("ALERT_REPOSITORY")
     if not token or not repo:
         return
     try:
@@ -138,10 +174,20 @@ def _create_github_issue(title: str, body: str) -> None:
             timeout=15,
         )
         if not resp.ok:
-            logger.warning("Failed to create GitHub issue: %s %s", resp.status_code, resp.text)
+            message = (
+                f"Failed to create private GitHub issue: "
+                f"{resp.status_code} {resp.text}"
+            )
+            if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+                raise RuntimeError(message)
+            logger.warning(message)
             return
         logger.info("Created GitHub issue: %s", resp.json().get("html_url"))
     except requests.RequestException as exc:
+        if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+            raise RuntimeError(
+                f"Failed to create private GitHub issue: {exc}"
+            ) from exc
         logger.warning("Failed to create GitHub issue: %s", exc)
 
 
@@ -226,6 +272,7 @@ def run_scan() -> None:
       5. Advance last_scanned_at for each market
     """
     scan_start = int(time.time())
+    private_alert_output = _private_alert_routing_enabled()
     logger.info("── Scan started at %s ──", time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(scan_start)))
 
     # ── Step 0: Sync watchlist wallets from config ────────────────────────────
@@ -346,7 +393,8 @@ def run_scan() -> None:
 
         result = detector.process_trade(trade, wallet_data)
         if result and result.is_alert:
-            print(_format_alert(trade, result))
+            if not private_alert_output:
+                print(_format_alert(trade, result))
             alerted_conditions.add(condition_id)
             alerts_data.append((trade, result))
 
@@ -359,16 +407,17 @@ def run_scan() -> None:
                 None,
             )
             question = market_row.get("question", condition_id) if market_row else condition_id
-            short_wallets = [w[:6] + "..." + w[-4:] for w in cluster_wallets]
-            print(
-                f"\n{'!'*70}\n"
-                f"[CLUSTER] {len(cluster_wallets)} wallets flagged on same market "
-                f"within {config.CLUSTER_WINDOW_HOURS}h\n"
-                f"  Market  : {question}\n"
-                f"  Wallets : {', '.join(short_wallets)}\n"
-                f"  → Possible coordinated insider activity\n"
-                f"{'!'*70}"
-            )
+            if not private_alert_output:
+                short_wallets = [w[:6] + "..." + w[-4:] for w in cluster_wallets]
+                print(
+                    f"\n{'!'*70}\n"
+                    f"[CLUSTER] {len(cluster_wallets)} wallets flagged on same market "
+                    f"within {config.CLUSTER_WINDOW_HOURS}h\n"
+                    f"  Market  : {question}\n"
+                    f"  Wallets : {', '.join(short_wallets)}\n"
+                    f"  → Possible coordinated insider activity\n"
+                    f"{'!'*70}"
+                )
             clusters_data.append((question, cluster_wallets))
 
     # ── Step 6: Advance last_scanned_at for all markets ─────────────────────
@@ -382,10 +431,13 @@ def run_scan() -> None:
         wl_trades = polymarket.get_watchlist_recent_trades(address, wl_since)
         new_wl_trades = [t for t in wl_trades if not database.watchlist_hit_exists(t.get("transactionHash", ""))]
         if new_wl_trades:
-            logger.info(
-                "Watchlist wallet %s (%s): %d new trade(s) detected",
-                address[:10] + "...", label, len(new_wl_trades),
-            )
+            if private_alert_output:
+                logger.info("Watchlist: %d new trade(s) detected", len(new_wl_trades))
+            else:
+                logger.info(
+                    "Watchlist wallet %s (%s): %d new trade(s) detected",
+                    address[:10] + "...", label, len(new_wl_trades),
+                )
         for trade in new_wl_trades:
             tx_hash = trade.get("transactionHash", "")
             database.insert_watchlist_hit(
@@ -401,7 +453,8 @@ def run_scan() -> None:
             enriched = dict(trade)
             enriched["_watchlist_label"] = label
             enriched["_watchlist_address"] = address
-            print(_format_watchlist_hit(enriched))
+            if not private_alert_output:
+                print(_format_watchlist_hit(enriched))
             watchlist_hits_data.append(enriched)
         database.set_watchlist_last_scanned(address, scan_start)
 
@@ -484,6 +537,7 @@ def run_scan() -> None:
 
 def main() -> None:
     _setup_logging()
+    _validate_alert_routing()
     database.init_db()
     logging.info("Database: %s", database.DB_PATH)
     run_scan()

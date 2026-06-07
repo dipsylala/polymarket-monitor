@@ -58,6 +58,17 @@ python main.py
 
 Each invocation covers all activity since the last run — designed to be called by a scheduler rather than kept running.
 
+### Private alert issues
+
+GitHub Actions sends alert, cluster, and watchlist issues to the private
+`dipsylala/polymarket-monitor-private` repository. Detailed alert data is
+omitted from this public repository's Actions logs and job summaries.
+
+Create a fine-grained personal access token scoped only to the private alert
+repository with **Issues: Read and write**, then add it to this repository as
+the Actions secret `PRIVATE_ALERT_REPO_TOKEN`. The workflow's built-in
+`GITHUB_TOKEN` cannot create issues in another repository.
+
 ## Tests
 
 ```powershell
