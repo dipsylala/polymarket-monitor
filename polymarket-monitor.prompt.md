@@ -1,13 +1,13 @@
 # Plan: Polymarket Insider Trading Monitor
 
-**TL;DR:** A Python CLI app that scans Polymarket on a schedule, scores wallets making large YES bets on geopolitical markets using a multi-signal risk model (wallet age, funding recency, trade concentration, bet size/odds), and logs alerts to the console. Blockchain wallet age is verified via PolygonScan API. All state persists in SQLite.
+**TL;DR:** A Python CLI app that scans Polymarket on a schedule, scores wallets making large YES bets on geopolitical markets using a multi-signal risk model (wallet age, funding recency, trade concentration, bet size/odds), and logs alerts to the console. Blockchain wallet age is verified via Etherscan API V2 on Polygon. All state persists in SQLite.
 
 ---
 
 ## Phase 1 — Project Scaffold
 
 1. `requirements.txt`: `requests`, `python-dotenv`
-2. `.env.example`: `POLYGONSCAN_API_KEY`
+2. `.env.example`: `ETHERSCAN_API_KEY`
 3. `config.py`: all tunable thresholds + geopolitical keyword list (see Phase 5)
 
 ## Phase 2 — Database Layer (`database.py`)
@@ -24,7 +24,7 @@
 6. `get_recent_trades(since_ts, condition_ids)` → `GET https://data-api.polymarket.com/trades?limit=500`, filtered to known condition IDs and `timestamp >= since_ts`
 7. `get_wallet_trades(address)` → `GET https://data-api.polymarket.com/trades?maker=<address>&limit=1000`, returns total trade count + distinct market count
 
-## Phase 4 — PolygonScan Client (`polygon.py`)
+## Phase 4 — Etherscan V2 Polygon Client (`polygon.py`)
 
 8. `get_wallet_first_tx(address)` → calls `txlist` (sort=asc, offset=1) — first transaction timestamp = proxy wallet age
 9. `get_wallet_last_usdc_in(address)` → calls `tokentx` with USDC contract `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` (sort=desc, filter `to==address`) — detects recent funding
@@ -54,7 +54,7 @@
     2. Fetch trades since `last_scanned_at` for each tracked market
     3. Filter to `outcome=="Yes"` + `side=="BUY"` + USDC spent > `MIN_BET_USDC` (default $500)
     4. Skip already-seen `tx_hash`
-    5. Fetch wallet context from Polymarket + PolygonScan
+    5. Fetch wallet context from Polymarket + Etherscan
     6. Score → if threshold met, insert alert + log to console
     7. Run cluster check over new alerts
     8. Advance `last_scanned_at`
@@ -79,7 +79,7 @@
 - All source files have been created and import cleanly.
 - A virtual environment exists at `.venv/`. Activate with `.venv\Scripts\Activate.ps1` (PowerShell) or `.venv/bin/activate` (bash/zsh).
 - Dependencies are installed: `pip install -r requirements.txt` (or already done inside `.venv`).
-- Copy `.env.example` → `.env` and fill in `POLYGONSCAN_API_KEY` before running.
+- Copy `.env.example` → `.env` and fill in `ETHERSCAN_API_KEY` before running.
 - The app is **cron-job friendly**: each invocation scans for activity since the last run (tracked via `last_scanned_at` in SQLite) and then exits. No persistent process needed.
 - Run manually: `python main.py`
 
@@ -101,7 +101,7 @@
 - `config.py` — thresholds, keywords, env vars
 - `database.py` — SQLite init + CRUD
 - `polymarket.py` — Gamma API + Data API clients
-- `polygon.py` — PolygonScan API client
+- `polygon.py` — Etherscan API V2 client for Polygon
 - `detector.py` — scoring logic + cluster detection
 - `requirements.txt`
 - `.env.example`
@@ -122,7 +122,7 @@
 
 1. `python main.py` → confirms geopolitical markets are fetched and counted (check log output)
 2. Inject a mock trade matching the known Iran-incident wallet addresses (from the Bubblemaps/CoinDesk reports) → confirm score ≥ 5
-3. Call PolygonScan against a known flagged wallet → confirm first-tx date returns Feb 2026
+3. Call Etherscan API V2 against a known flagged wallet → confirm first-tx date returns Feb 2026
 4. Confirm SQLite schema created on first run, no duplicate `tx_hash` on second run
 
 ---
@@ -130,5 +130,5 @@
 ## Further Considerations
 
 1. **`side` field semantics**: Live Data API shows `side=BUY/SELL` and a separate `outcome` field (`Yes`/`No`). Filter on both `side=="BUY"` AND `outcome=="Yes"` to isolate YES purchases. Worth confirming against a known YES trade.
-2. **Wallet graph clustering (future)**: Bubblemaps detected the Iran cluster partly via *shared funding path* — multiple wallets funded from the same intermediate address. This requires building a graph of PolygonScan `tokentx` funding sources, which is out of v1 scope but could be added as a Phase 8.
-3. **PolygonScan free tier limits**: At 4 req/s with hourly scans, this is well within limits *unless* a flood of suspicious trades all need wallet lookups simultaneously. Consider a queue with backoff.
+2. **Wallet graph clustering (future)**: Bubblemaps detected the Iran cluster partly via *shared funding path* — multiple wallets funded from the same intermediate address. This requires building a graph of Etherscan `tokentx` funding sources, which is out of v1 scope but could be added as a Phase 8.
+3. **Etherscan free tier limits**: At 2.5 req/s with hourly scans, this is well within limits *unless* a flood of suspicious trades all need wallet lookups simultaneously. Consider a queue with backoff.

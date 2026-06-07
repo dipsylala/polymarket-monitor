@@ -5,7 +5,7 @@ Tables
 ------
 markets       : geopolitical markets being monitored
 trades        : individual trades seen during each scan
-wallets       : wallet metadata fetched from Polymarket + PolygonScan
+wallets       : wallet metadata fetched from Polymarket + Etherscan
 alerts        : scored wallets that crossed the alert threshold
 """
 

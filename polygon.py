@@ -1,11 +1,11 @@
 """
-polygon.py — PolygonScan API client for on-chain wallet data.
+polygon.py — Etherscan API V2 client for Polygon on-chain wallet data.
 
 Used to determine:
   - When a proxy wallet was first active on Polygon (wallet age)
   - When it last received a USDC deposit (recently funded signal)
 
-Rate-limited to POLYGONSCAN_REQ_PER_SEC to stay inside the free tier (5 req/s).
+Rate-limited to ETHERSCAN_REQ_PER_SEC to stay inside the free tier (3 req/s).
 """
 
 import logging
@@ -27,7 +27,7 @@ _last_request_ts: float = 0.0
 def _throttle() -> None:
     """Enforce the configured per-second rate limit."""
     global _last_request_ts
-    min_gap = 1.0 / config.POLYGONSCAN_REQ_PER_SEC
+    min_gap = 1.0 / config.ETHERSCAN_REQ_PER_SEC
     elapsed = time.monotonic() - _last_request_ts
     if elapsed < min_gap:
         time.sleep(min_gap - elapsed)
@@ -35,21 +35,21 @@ def _throttle() -> None:
 
 
 def _get(params: dict) -> Optional[dict]:
-    """Execute a PolygonScan API call and return the parsed JSON, or None on error."""
-    if not config.POLYGONSCAN_API_KEY:
-        logger.warning("POLYGONSCAN_API_KEY not set; skipping on-chain lookup")
+    """Execute an Etherscan API V2 call and return parsed JSON, or None on error."""
+    if not config.ETHERSCAN_API_KEY:
+        logger.warning("ETHERSCAN_API_KEY not set; skipping on-chain lookup")
         return None
 
     _throttle()
-    params["apikey"] = config.POLYGONSCAN_API_KEY
-    params["chainid"] = config.POLYGONSCAN_CHAIN_ID
+    params["apikey"] = config.ETHERSCAN_API_KEY
+    params["chainid"] = config.ETHERSCAN_CHAIN_ID
 
     try:
-        resp = _SESSION.get(config.POLYGONSCAN_API_URL, params=params, timeout=15)
+        resp = _SESSION.get(config.ETHERSCAN_API_URL, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as exc:
-        logger.error("PolygonScan request error: %s", exc)
+        logger.error("Etherscan request error: %s", exc)
         return None
 
     if data.get("status") != "1":
@@ -58,7 +58,7 @@ def _get(params: dict) -> Optional[dict]:
         msg = data.get("message", "")
         if "No transactions found" in msg:
             return data
-        logger.debug("PolygonScan non-success: %s", data.get("message"))
+        logger.debug("Etherscan non-success: %s", data.get("message"))
         return None
 
     return data

@@ -16,7 +16,8 @@ Wallets scoring **≥ 5** are printed as alerts. If **3 or more** flagged wallet
 
 In parallel, every run checks a **watchlist** of known insider-trading wallets (`WATCHLIST_WALLETS` in `config.py`). Any trade from a watchlist address on *any* market triggers an immediate alert regardless of score. On the first scan of a newly added wallet, the previous 4 months of trades are backfilled automatically.
 
-On-chain wallet age and funding recency are verified via the [PolygonScan API](https://polygonscan.com/apis) (free tier).
+On-chain wallet age and funding recency are verified on Polygon through
+[Etherscan API V2](https://docs.etherscan.io/etherscan-v2).
 
 ## Setup
 
@@ -27,7 +28,7 @@ On-chain wallet age and funding recency are verified via the [PolygonScan API](h
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 # 1. Clone / navigate to the project
-cd E:\Github\PolymarketMonitor
+cd E:\Github\polymarket-monitor
 
 # 2. Create a virtual environment
 uv venv .venv
@@ -37,10 +38,13 @@ uv pip install -r requirements.txt
 
 # 4. Configure
 cp .env.example .env
-# Edit .env and add your POLYGONSCAN_API_KEY
+# Edit .env and add your ETHERSCAN_API_KEY
 ```
 
-Get a free PolygonScan API key at [https://polygonscan.com/apis](https://polygonscan.com/apis). Without it the app still runs, but wallet age and funding checks are skipped (lower max score).
+Create a free Etherscan API key at
+[https://etherscan.io/myapikey](https://etherscan.io/myapikey). Without it,
+the app still runs, but wallet age and funding signals are omitted, reducing
+the maximum possible score from 12 to 6.
 
 The Polymarket Gamma and Data APIs used for market and trade monitoring are
 public and do not require a Polymarket API key.
@@ -69,8 +73,8 @@ The test suite covers the three known insider-trading incident profiles (US-Iran
 
 ### Windows Task Scheduler
 
-- **Program:** `E:\Github\PolymarketPoll\.venv\Scripts\python.exe`
-- **Arguments:** `E:\Github\PolymarketPoll\main.py`
+- **Program:** `E:\Github\polymarket-monitor\.venv\Scripts\python.exe`
+- **Arguments:** `E:\Github\polymarket-monitor\main.py`
 - **Trigger:** Daily, repeat every 1 hour
 
 ## Output
@@ -133,7 +137,7 @@ All thresholds are in [`config.py`](config.py):
 ```plaintext
 main.py          Entry point + scan orchestrator
 polymarket.py    Gamma API + Data API clients
-polygon.py       PolygonScan wallet age/funding checks
+polygon.py       Etherscan V2 Polygon wallet age/funding checks
 detector.py      Scoring model + cluster detection
 database.py      SQLite persistence (markets, trades, wallets, alerts,
                  watchlist_wallets, watchlist_hits)
