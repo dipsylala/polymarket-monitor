@@ -252,14 +252,25 @@ def run_scan() -> None:
 
     logger.info("Monitoring %d geopolitical markets", len(condition_ids))
 
-    # ── Step 2: Determine global since_ts (earliest last_scanned across markets) ──
-    # We fetch all trades since the oldest un-scanned timestamp to use a single
-    # Data API call, then filter per-market in memory.
-    per_market_since: dict[str, int] = {cid: database.get_market_last_scanned(cid) for cid in condition_ids}
-    global_since = min(per_market_since.values()) if per_market_since else 0
+    # ── Step 2: Determine each market's scan window ───────────────────────────
+    overlap_since = scan_start - config.SCAN_OVERLAP_HOURS * 3600
+    per_market_since: dict[str, int] = {}
+    for cid in condition_ids:
+        previous_scan = database.get_market_last_scanned(cid)
+        per_market_since[cid] = (
+            min(previous_scan, overlap_since)
+            if previous_scan
+            else overlap_since
+        )
 
     # ── Step 3: Fetch qualifying trades ───────────────────────────────────────
-    trades = polymarket.get_recent_trades(since_ts=global_since, condition_ids=condition_ids)
+    try:
+        trades = polymarket.get_recent_trades(per_market_since)
+    except polymarket.TradeFetchError as exc:
+        # Never advance timestamps after a partial read; the next run must retry
+        # the same window instead of permanently skipping activity.
+        logger.error("Trade scan incomplete; scan timestamps unchanged: %s", exc)
+        return
     new_trades = [t for t in trades if not database.trade_exists(t.get("transactionHash", ""))]
     logger.info("%d new qualifying trades to process", len(new_trades))
 

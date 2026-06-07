@@ -103,7 +103,7 @@ class TestMaduroProfile(unittest.TestCase):
             address="0xBEEF5678beef5678beef5678beef5678beef5678",
             trade_price=0.07,
             trade_size=714_285,       # ~$50,000 / $0.07
-            first_tx_ts=None,         # brand-new — no on-chain history
+            first_tx_ts=0,            # confirmed brand-new — no on-chain history
             last_funded_ts=_hours_ago(6),
             prior_trade_count=0,
             distinct_markets=1,
@@ -141,7 +141,7 @@ class TestZachXBTAxiomProfile(unittest.TestCase):
             address=self.WALLET,
             trade_price=0.151,
             trade_size=335_762,       # ~$50,700 / $0.151
-            first_tx_ts=None,         # brand-new
+            first_tx_ts=0,            # confirmed brand-new
             last_funded_ts=_hours_ago(3),
             prior_trade_count=0,
             distinct_markets=1,
@@ -386,7 +386,7 @@ class TestMaduroProfile(unittest.TestCase):
             address="0xBEEF5678beef5678beef5678beef5678beef5678",
             trade_price=0.07,
             trade_size=457_143,       # ~$32k / $0.07
-            first_tx_ts=None,         # brand-new — no on-chain history
+            first_tx_ts=0,            # confirmed brand-new — no on-chain history
             last_funded_ts=_hours_ago(6),
             prior_trade_count=0,
             distinct_markets=1,
@@ -421,7 +421,7 @@ class TestZachXBTAxiomProfile(unittest.TestCase):
             address="0xCAFE9999cafe9999cafe9999cafe9999cafe9999",
             trade_price=0.14,
             trade_size=477_415,
-            first_tx_ts=None,         # brand-new
+            first_tx_ts=0,            # confirmed brand-new
             last_funded_ts=_hours_ago(3),
             prior_trade_count=0,
             distinct_markets=1,
@@ -764,6 +764,24 @@ class TestUkraineWarScoringProfile(unittest.TestCase):
 
     def test_large_bet_signal(self):
         self.assertTrue(any(r.startswith("large_bet") for r in self.result.reasons))
+
+
+class TestUnknownOnChainEnrichment(unittest.TestCase):
+    def test_unknown_lookups_do_not_add_wallet_or_funding_points(self):
+        result = score_wallet(
+            address="0xunknown",
+            trade_price=0.10,
+            trade_size=6_000,
+            first_tx_ts=None,
+            last_funded_ts=None,
+            prior_trade_count=50,
+            distinct_markets=10,
+        )
+
+        self.assertEqual(1, result.score)
+        self.assertFalse(any(r.startswith("new_wallet") for r in result.reasons))
+        self.assertFalse(any(r.startswith("funded_") for r in result.reasons))
+        self.assertNotIn("funding_unknown", result.reasons)
 
 
 if __name__ == "__main__":

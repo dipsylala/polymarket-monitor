@@ -5,6 +5,7 @@ Both APIs are fully public (no authentication required).
 """
 
 import logging
+import time
 from typing import Optional
 
 import requests
@@ -15,6 +16,16 @@ logger = logging.getLogger(__name__)
 
 _SESSION = requests.Session()
 _SESSION.headers.update({"Accept": "application/json"})
+
+_DATA_API_PAGE_SIZE = 500
+_DATA_API_MAX_OFFSET = 3000
+_DATA_API_MAX_ATTEMPTS = 3
+_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+
+
+class TradeFetchError(RuntimeError):
+    """Raised when a trade window cannot be fetched completely."""
+
 
 # ── Gamma API ─────────────────────────────────────────────────────────────────
 
@@ -50,7 +61,8 @@ def get_geopolitical_markets() -> list[dict]:
 
         for market in page:
             question: str = market.get("question", "").lower()
-            if (
+            excluded = any(kw in question for kw in config.EXCLUDED_MARKET_KEYWORDS)
+            if not excluded and (
                 any(kw in question for kw in config.GEOPOLITICAL_KEYWORDS)
                 or any(kw in question for kw in config.INVESTIGATION_KEYWORDS)
                 or any(kw in question for kw in config.AIRPORT_KEYWORDS)
@@ -69,72 +81,139 @@ def get_geopolitical_markets() -> list[dict]:
 
 # ── Data API ──────────────────────────────────────────────────────────────────
 
-def get_recent_trades(since_ts: int, condition_ids: set[str]) -> list[dict]:
-    """
-    Fetch recent trades from the Data API and return those that:
-      - belong to one of the watched condition IDs
-      - have a timestamp >= since_ts
-      - are BUY-side YES trades
-      - have USDC spent (size * price) >= MIN_BET_USDC
-    """
-    results: list[dict] = []
-    offset = 0
-    page_size = 500
-    exhausted = False
+def _get_trade_page(params: dict, context: str) -> list[dict]:
+    """Fetch one Data API page, retrying transient failures."""
+    last_error: Optional[Exception] = None
 
-    while not exhausted:
+    for attempt in range(1, _DATA_API_MAX_ATTEMPTS + 1):
         try:
             resp = _SESSION.get(
                 f"{config.DATA_API_URL}/trades",
-                params={"limit": page_size, "offset": offset},
+                params=params,
                 timeout=15,
             )
-            if resp.status_code == 400:
-                # API caps pagination; no more results available at this offset
-                logger.debug("Data API pagination limit reached at offset=%d", offset)
-                break
+            if resp.status_code in _RETRYABLE_STATUS_CODES:
+                raise requests.HTTPError(
+                    f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    response=resp,
+                )
             resp.raise_for_status()
-        except requests.RequestException as exc:
-            logger.error("Data API error fetching trades: %s", exc)
-            break
+            page = resp.json()
+            if not isinstance(page, list):
+                raise TradeFetchError(
+                    f"Data API returned an unexpected payload for {context}"
+                )
+            return page
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            if attempt == _DATA_API_MAX_ATTEMPTS:
+                break
+            delay = 2 ** (attempt - 1)
+            logger.warning(
+                "Data API error fetching %s (attempt %d/%d): %s; retrying in %ds",
+                context,
+                attempt,
+                _DATA_API_MAX_ATTEMPTS,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
 
-        page: list[dict] = resp.json()
-        if not page:
-            break
+    raise TradeFetchError(
+        f"Data API failed while fetching {context}: {last_error}"
+    ) from last_error
 
-        for trade in page:
-            ts = trade.get("timestamp", 0)
 
-            # Data API returns newest-first; stop paging once we go past since_ts
-            if ts < since_ts:
-                exhausted = True
+def get_recent_trades(since_by_market: dict[str, int]) -> list[dict]:
+    """
+    Fetch recent trades from the Data API and return those that:
+      - belong to one of the watched condition IDs
+      - have a timestamp >= that market's last successful scan
+      - are BUY-side YES trades
+      - have USDC spent (size * price) >= MIN_BET_USDC
+
+    Each market is queried separately. The platform-wide feed can contain more
+    than the Data API's 3,000-record pagination window in a few seconds, and
+    comma-separated market filters currently time out. Server-side side and
+    cash filters keep each individual market window small.
+
+    Raises TradeFetchError rather than returning partial data. Callers must not
+    advance scan timestamps after this exception.
+    """
+    results: list[dict] = []
+    for condition_id in sorted(since_by_market):
+        since_ts = since_by_market[condition_id]
+        offset = 0
+
+        while True:
+            params = {
+                "market": condition_id,
+                "limit": _DATA_API_PAGE_SIZE,
+                "offset": offset,
+                "takerOnly": "false",
+                "side": "BUY",
+                "filterType": "CASH",
+                "filterAmount": config.MIN_BET_USDC,
+            }
+            page = _get_trade_page(
+                params,
+                context=f"market {condition_id} at offset {offset}",
+            )
+            if not page:
                 break
 
-            condition_id = trade.get("conditionId", "")
-            if condition_id not in condition_ids:
-                continue
+            reached_previous_scan = False
+            for trade in page:
+                try:
+                    ts = int(trade.get("timestamp", 0))
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Skipping trade with invalid timestamp on market %s",
+                        condition_id,
+                    )
+                    continue
 
-            if trade.get("side", "").upper() != "BUY":
-                continue
+                # Data API returns newest-first for a single market.
+                if ts < since_ts:
+                    reached_previous_scan = True
+                    break
 
-            if trade.get("outcome", "").lower() != "yes":
-                continue
+                if trade.get("conditionId", "") != condition_id:
+                    continue
+                if trade.get("side", "").upper() != "BUY":
+                    continue
+                if trade.get("outcome", "").lower() != "yes":
+                    continue
 
-            size = float(trade.get("size", 0))
-            price = float(trade.get("price", 0))
-            if size * price < config.MIN_BET_USDC:
-                continue
+                try:
+                    size = float(trade.get("size", 0))
+                    price = float(trade.get("price", 0))
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Skipping trade with invalid size/price on market %s",
+                        condition_id,
+                    )
+                    continue
+                if size * price < config.MIN_BET_USDC:
+                    continue
 
-            results.append(trade)
+                results.append(trade)
 
-        if len(page) < page_size:
-            break
+            if reached_previous_scan or len(page) < _DATA_API_PAGE_SIZE:
+                break
 
-        offset += page_size
+            next_offset = offset + _DATA_API_PAGE_SIZE
+            if next_offset > _DATA_API_MAX_OFFSET:
+                raise TradeFetchError(
+                    "Data API pagination limit reached before the previous "
+                    f"scan for market {condition_id} (since_ts={since_ts})"
+                )
+            offset = next_offset
 
     logger.info(
-        "Found %d qualifying trades since ts=%d across %d markets",
-        len(results), since_ts, len(condition_ids),
+        "Found %d qualifying trades across %d markets",
+        len(results),
+        len(since_by_market),
     )
     return results
 

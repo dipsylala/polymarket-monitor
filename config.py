@@ -37,6 +37,11 @@ LARGE_BET_USDC: float = 5_000.0
 # Minimum USDC spent on a trade to even consider it for scoring
 MIN_BET_USDC: float = 500.0
 
+# Re-read at least this much recent history on every scan. Database
+# deduplication makes the overlap safe and lets a fixed/deferred API response
+# recover on a later run.
+SCAN_OVERLAP_HOURS: int = 24
+
 # Alert when wallet score reaches or exceeds this value
 ALERT_SCORE_THRESHOLD: int = 5
 
@@ -103,7 +108,7 @@ GEOPOLITICAL_KEYWORDS: list[str] = [
     "warship",
     "frontline",
     "provocat",  # covers "provocation", "provocative"
-    "detonат",
+    "detonat",   # covers "detonate", "detonation"
     "chemical weapon",
     "biological weapon",
     "resign",
@@ -191,6 +196,24 @@ AIRPORT_KEYWORDS: list[str] = [
     "ground stop",
     "air traffic",
     "aviation",
+]
+
+# Markets containing a geopolitical named entity can still be unrelated sports
+# questions (for example, "Will Iran win the FIFA World Cup?").
+EXCLUDED_MARKET_KEYWORDS: list[str] = [
+    "world cup",
+    "fifa",
+    "uefa",
+    "champions league",
+    "premier league",
+    "super bowl",
+    "nba",
+    "nfl",
+    "nhl",
+    "mlb",
+    "ufc",
+    "grand slam",
+    "formula 1",
 ]
 
 # ── PolygonScan rate limit ────────────────────────────────────────────────────

@@ -53,10 +53,12 @@ def _get(params: dict) -> Optional[dict]:
         return None
 
     if data.get("status") != "1":
-        # status "0" with message "No transactions found" is normal for new wallets
+        # Preserve a confirmed empty result so callers can distinguish a new
+        # wallet from a missing key or failed lookup.
         msg = data.get("message", "")
-        if "No transactions found" not in msg:
-            logger.debug("PolygonScan non-success: %s", data.get("message"))
+        if "No transactions found" in msg:
+            return data
+        logger.debug("PolygonScan non-success: %s", data.get("message"))
         return None
 
     return data
@@ -65,7 +67,8 @@ def _get(params: dict) -> Optional[dict]:
 def get_wallet_first_tx(address: str) -> Optional[int]:
     """
     Return the Unix timestamp of the wallet's first Polygon transaction,
-    or None if no transactions exist or the API key is missing.
+    0 if the API confirms no transactions exist, or None if the lookup could
+    not be completed.
 
     The first transaction timestamp serves as a reliable "wallet age" proxy
     because Polymarket proxy wallets are created on-chain at first use.
@@ -80,12 +83,12 @@ def get_wallet_first_tx(address: str) -> Optional[int]:
         "offset": "1",        # only need the very first tx
         "sort": "asc",
     })
-    if not data:
+    if data is None:
         return None
 
     txns: list[dict] = data.get("result", [])
     if not txns:
-        return None
+        return 0
 
     try:
         return int(txns[0]["timeStamp"])

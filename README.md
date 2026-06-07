@@ -42,6 +42,9 @@ cp .env.example .env
 
 Get a free PolygonScan API key at [https://polygonscan.com/apis](https://polygonscan.com/apis). Without it the app still runs, but wallet age and funding checks are skipped (lower max score).
 
+The Polymarket Gamma and Data APIs used for market and trade monitoring are
+public and do not require a Polymarket API key.
+
 ## Usage
 
 ```powershell
@@ -117,6 +120,7 @@ All thresholds are in [`config.py`](config.py):
 | `LOW_ODDS_PRICE` | 0.20 | Share price below which a bet is considered low-odds |
 | `LARGE_BET_USDC` | 5000 | USDC spent threshold for large-bet signal |
 | `MIN_BET_USDC` | 500 | Minimum USDC spent to even evaluate a trade |
+| `SCAN_OVERLAP_HOURS` | 24 | Minimum recent window re-read on every scan |
 | `ALERT_SCORE_THRESHOLD` | 5 | Minimum score to emit an alert |
 | `CLUSTER_MIN_WALLETS` | 3 | Wallets required to trigger a cluster warning |
 | `CLUSTER_WINDOW_HOURS` | 24 | Time window for cluster detection |

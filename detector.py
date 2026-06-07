@@ -72,15 +72,14 @@ def score_wallet(
     reasons: list[str] = []
 
     # ── Signal 1: New wallet ──────────────────────────────────────────────────
-    if first_tx_ts is not None:
+    if first_tx_ts == 0:
+        score += 3
+        reasons.append("new_wallet(no_history)")
+    elif first_tx_ts is not None:
         age_days = (now - first_tx_ts) / 86400
         if age_days < config.WALLET_AGE_DAYS:
             score += 3
             reasons.append(f"new_wallet({int(age_days)}d)")
-    else:
-        # No on-chain history at all — treat as brand-new
-        score += 3
-        reasons.append("new_wallet(no_history)")
 
     # ── Signal 2: Recently funded ─────────────────────────────────────────────
     if last_funded_ts is not None:
@@ -88,10 +87,6 @@ def score_wallet(
         if funded_hours_ago < config.FUNDING_RECENCY_HOURS:
             score += 3
             reasons.append(f"funded_{int(funded_hours_ago)}h_ago")
-    else:
-        # Can't determine funding — slight uplift (uncertainty)
-        score += 1
-        reasons.append("funding_unknown")
 
     # ── Signal 3: Low trade history ───────────────────────────────────────────
     if prior_trade_count < config.LOW_HISTORY_TRADES:
