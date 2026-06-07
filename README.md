@@ -1,4 +1,5 @@
 # Polymarket Monitor
+
 ## How it works
 
 Each run fetches all YES trades on geopolitical markets since the previous run and scores the wallets behind them across six signals:
