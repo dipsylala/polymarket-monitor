@@ -271,8 +271,26 @@ def run_scan() -> None:
         # the same window instead of permanently skipping activity.
         logger.error("Trade scan incomplete; scan timestamps unchanged: %s", exc)
         return
-    new_trades = [t for t in trades if not database.trade_exists(t.get("transactionHash", ""))]
-    logger.info("%d new qualifying trades to process", len(new_trades))
+    new_trades: list[dict] = []
+    processed_trades: list[dict] = []
+    for trade in trades:
+        if database.trade_exists(trade.get("transactionHash", "")):
+            processed_trades.append(trade)
+        else:
+            new_trades.append(trade)
+
+    logger.info(
+        "%d qualifying trades fetched: %d new, %d already processed",
+        len(trades),
+        len(new_trades),
+        len(processed_trades),
+    )
+    for trade in processed_trades:
+        logger.debug(
+            "Skipping already processed trade %s on %s",
+            trade.get("transactionHash", ""),
+            trade.get("title", trade.get("conditionId", "unknown market")),
+        )
 
     # ── Step 4: Score each trade ──────────────────────────────────────────────
     alerted_conditions: set[str] = set()
