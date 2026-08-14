@@ -218,10 +218,16 @@ def get_recent_trades(since_by_market: dict[str, int]) -> list[dict]:
     return results
 
 
-def get_wallet_trade_history(address: str) -> tuple[int, int]:
+def get_wallet_trade_history(address: str, exclude_tx_hash: str = "") -> tuple[int, int]:
     """
-    Return (total_trade_count, distinct_market_count) for a given proxy wallet.
+    Return (prior_trade_count, distinct_market_count) for a given proxy wallet.
     Uses the Data API `trades` endpoint filtered by user address.
+
+    `exclude_tx_hash` excludes the trade currently being scored from the prior
+    trade count — by the time this runs, the Data API already reflects it, so
+    without exclusion a wallet's very first trade would count as 1 prior trade
+    instead of 0. It still counts toward distinct_market_count, since "only one
+    market ever traded" is meant to include the trade being evaluated.
     """
     total = 0
     markets: set[str] = set()
@@ -248,10 +254,12 @@ def get_wallet_trade_history(address: str) -> tuple[int, int]:
             break
 
         for trade in page:
-            total += 1
             cid = trade.get("conditionId")
             if cid:
                 markets.add(cid)
+            if exclude_tx_hash and trade.get("transactionHash") == exclude_tx_hash:
+                continue
+            total += 1
 
         if len(page) < page_size:
             break

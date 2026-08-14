@@ -127,6 +127,33 @@ class RecentTradesTests(unittest.TestCase):
         )
 
 
+class WalletTradeHistoryTests(unittest.TestCase):
+    @patch.object(polymarket._SESSION, "get")
+    def test_excludes_current_trade_from_prior_count_but_not_markets(self, get):
+        address = "0xwallet"
+        get.return_value = RecentTradesTests()._response([
+            {"conditionId": "market-a", "transactionHash": "0xcurrent"},
+        ])
+
+        total, markets = polymarket.get_wallet_trade_history(address, exclude_tx_hash="0xcurrent")
+
+        self.assertEqual(0, total)
+        self.assertEqual(1, markets)
+
+    @patch.object(polymarket._SESSION, "get")
+    def test_counts_all_trades_when_no_exclusion_given(self, get):
+        address = "0xwallet"
+        get.return_value = RecentTradesTests()._response([
+            {"conditionId": "market-a", "transactionHash": "0xone"},
+            {"conditionId": "market-b", "transactionHash": "0xtwo"},
+        ])
+
+        total, markets = polymarket.get_wallet_trade_history(address)
+
+        self.assertEqual(2, total)
+        self.assertEqual(2, markets)
+
+
 class MarketFilterTests(unittest.TestCase):
     @patch.object(polymarket._SESSION, "get")
     def test_excludes_sports_market_with_geopolitical_country_name(self, get):

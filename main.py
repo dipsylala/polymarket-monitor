@@ -22,6 +22,7 @@ import logging
 import os
 import sys
 import time
+from dataclasses import dataclass
 
 import requests
 
@@ -32,6 +33,95 @@ import polygon
 import polymarket
 
 logger = logging.getLogger(__name__)
+
+
+# ── Shared alert/watchlist-hit field derivation ────────────────────────────────
+# Console text, the GitHub Actions step summary, and GitHub issue bodies each
+# render the same trade data differently, but need the same derived fields
+# (short address, explorer links, USDC spent, ...). Deriving them once here
+# keeps the three renderers from drifting out of sync with each other.
+
+def _short_addr(address: str) -> str:
+    return address[:6] + "..." + address[-4:] if len(address) > 10 else address
+
+
+@dataclass
+class AlertView:
+    score: int
+    reasons_str: str
+    short_addr: str
+    wallet_url: str
+    tx_hash: str
+    tx_url: str
+    question: str
+    market_url: str
+    size: float
+    price: float
+    usdc_spent: float
+    potential_profit: float
+
+
+def _alert_view(trade: dict, result: detector.ScoreResult) -> AlertView:
+    address = trade.get("proxyWallet", "")
+    question = trade.get("title", trade.get("conditionId", "unknown market"))
+    slug = trade.get("slug", "")
+    price = float(trade.get("price", 0))
+    size = float(trade.get("size", 0))
+    usdc_spent = price * size
+    tx_hash = trade.get("transactionHash", "n/a")
+    return AlertView(
+        score=result.score,
+        reasons_str=", ".join(result.reasons),
+        short_addr=_short_addr(address),
+        wallet_url=f"https://polygonscan.com/address/{address}",
+        tx_hash=tx_hash,
+        tx_url=f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash,
+        question=question,
+        market_url=f"https://polymarket.com/event/{slug}" if slug else "",
+        size=size,
+        price=price,
+        usdc_spent=usdc_spent,
+        potential_profit=size - usdc_spent,  # profit if resolves YES at $1
+    )
+
+
+@dataclass
+class WatchlistHitView:
+    label: str
+    short_addr: str
+    wallet_url: str
+    tx_hash: str
+    tx_url: str
+    question: str
+    market_url: str
+    size: float
+    price: float
+    usdc_spent: float
+    side: str
+    outcome: str
+
+
+def _watchlist_hit_view(trade: dict) -> WatchlistHitView:
+    address = trade.get("_watchlist_address") or trade.get("proxyWallet", "")
+    question = trade.get("title", trade.get("conditionId", "unknown market"))
+    slug = trade.get("slug", "")
+    price = float(trade.get("price", 0))
+    size = float(trade.get("size", 0))
+    tx_hash = trade.get("transactionHash", "n/a")
+    return WatchlistHitView(
+        label=trade.get("_watchlist_label", "known insider"),
+        short_addr=_short_addr(address),
+        wallet_url=f"https://polygonscan.com/address/{address}",
+        tx_hash=tx_hash,
+        tx_url=f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash,
+        question=question,
+        market_url=f"https://polymarket.com/event/{slug}" if slug else "",
+        size=size,
+        price=price,
+        usdc_spent=price * size,
+        side=trade.get("side", "?"),
+        outcome=trade.get("outcome", "?"),
+    )
 
 
 def _private_alert_routing_enabled() -> bool:
@@ -88,28 +178,16 @@ def _write_step_summary(alerts_data: list, clusters_data: list, watchlist_hits_d
         if alerts_data:
             lines.append("### Alerts\n")
             for trade, result in alerts_data:
-                address = trade.get("proxyWallet", "")
-                question = trade.get("title", trade.get("conditionId", "unknown market"))
-                slug = trade.get("slug", "")
-                price = float(trade.get("price", 0))
-                size = float(trade.get("size", 0))
-                usdc_spent = price * size
-                potential_profit = size - usdc_spent
-                tx_hash = trade.get("transactionHash", "n/a")
-                short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
-                reasons_str = ", ".join(result.reasons)
-                wallet_url = f"https://polygonscan.com/address/{address}"
-                tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
-                market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+                v = _alert_view(trade, result)
                 lines.append(
-                    f"**Score {result.score} — [{short_addr}]({wallet_url})**  \n"
-                    f"Market: {question}  \n"
-                    f"Reasons: `{reasons_str}`  \n"
-                    f"Trade: {size:,.0f} YES shares @ ${price:.3f} "
-                    f"| USDC spent: ${usdc_spent:,.0f} "
-                    f"| Potential profit: ${potential_profit:,.0f}  \n"
-                    f"[Transaction]({tx_url})"
-                    + (f" | [Market]({market_url})" if market_url else "")
+                    f"**Score {v.score} — [{v.short_addr}]({v.wallet_url})**  \n"
+                    f"Market: {v.question}  \n"
+                    f"Reasons: `{v.reasons_str}`  \n"
+                    f"Trade: {v.size:,.0f} YES shares @ ${v.price:.3f} "
+                    f"| USDC spent: ${v.usdc_spent:,.0f} "
+                    f"| Potential profit: ${v.potential_profit:,.0f}  \n"
+                    f"[Transaction]({v.tx_url})"
+                    + (f" | [Market]({v.market_url})" if v.market_url else "")
                     + "\n"
                 )
 
@@ -117,7 +195,7 @@ def _write_step_summary(alerts_data: list, clusters_data: list, watchlist_hits_d
             lines.append("### Clusters\n")
             for question, wallets in clusters_data:
                 links = ", ".join(
-                    f"[{w[:6]}...{w[-4:]}](https://polygonscan.com/address/{w})" for w in wallets
+                    f"[{_short_addr(w)}](https://polygonscan.com/address/{w})" for w in wallets
                 )
                 lines.append(
                     f"**{len(wallets)} wallets on same market within {config.CLUSTER_WINDOW_HOURS}h**  \n"
@@ -128,27 +206,14 @@ def _write_step_summary(alerts_data: list, clusters_data: list, watchlist_hits_d
         if watchlist_hits_data:
             lines.append("### Watchlist Hits\n")
             for trade in watchlist_hits_data:
-                address = trade.get("proxyWallet", "")
-                label = trade.get("_watchlist_label", "known insider")
-                question = trade.get("title", trade.get("conditionId", "unknown market"))
-                slug = trade.get("slug", "")
-                price = float(trade.get("price", 0))
-                size = float(trade.get("size", 0))
-                usdc_spent = price * size
-                tx_hash = trade.get("transactionHash", "n/a")
-                side = trade.get("side", "?")
-                outcome = trade.get("outcome", "?")
-                short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
-                wallet_url = f"https://polygonscan.com/address/{address}"
-                tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
-                market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+                v = _watchlist_hit_view(trade)
                 lines.append(
-                    f"**[WATCHLIST] [{short_addr}]({wallet_url})** — {label}  \n"
-                    f"Market: {question}  \n"
-                    f"Trade: {size:,.0f} {outcome} shares @ ${price:.3f} ({side})"
-                    f" | USDC: ${usdc_spent:,.0f}  \n"
-                    f"[Transaction]({tx_url})"
-                    + (f" | [Market]({market_url})" if market_url else "")
+                    f"**[WATCHLIST] [{v.short_addr}]({v.wallet_url})** — {v.label}  \n"
+                    f"Market: {v.question}  \n"
+                    f"Trade: {v.size:,.0f} {v.outcome} shares @ ${v.price:.3f} ({v.side})"
+                    f" | USDC: ${v.usdc_spent:,.0f}  \n"
+                    f"[Transaction]({v.tx_url})"
+                    + (f" | [Market]({v.market_url})" if v.market_url else "")
                     + "\n"
                 )
 
@@ -201,63 +266,34 @@ def _setup_logging() -> None:
 
 
 def _format_watchlist_hit(trade: dict) -> str:
-    address = trade.get("_watchlist_address") or trade.get("proxyWallet", "")
-    label = trade.get("_watchlist_label", "known insider")
-    question = trade.get("title", trade.get("conditionId", "unknown market"))
-    slug = trade.get("slug", "")
-    price = float(trade.get("price", 0))
-    size = float(trade.get("size", 0))
-    usdc_spent = price * size
-    tx_hash = trade.get("transactionHash", "n/a")
-    side = trade.get("side", "?")
-    outcome = trade.get("outcome", "?")
-    short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
-
-    wallet_url = f"https://polygonscan.com/address/{address}"
-    tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
-    market_url = f"https://polymarket.com/event/{slug}" if slug else ""
-
+    v = _watchlist_hit_view(trade)
     return (
         f"\n{'*'*70}\n"
-        f"[WATCHLIST HIT] Known insider active: {short_addr} ({label})\n"
-        f"  Market : {question}\n"
-        f"  Trade  : {size:,.0f} {outcome} shares @ ${price:.3f}  "
-        f"| USDC spent: ${usdc_spent:,.0f}  "
-        f"| Side: {side}\n"
-        f"  Wallet : {wallet_url}\n"
-        f"  tx     : {tx_url}\n"
-        + (f"  Market : {market_url}\n" if market_url else "")
+        f"[WATCHLIST HIT] Known insider active: {v.short_addr} ({v.label})\n"
+        f"  Market : {v.question}\n"
+        f"  Trade  : {v.size:,.0f} {v.outcome} shares @ ${v.price:.3f}  "
+        f"| USDC spent: ${v.usdc_spent:,.0f}  "
+        f"| Side: {v.side}\n"
+        f"  Wallet : {v.wallet_url}\n"
+        f"  tx     : {v.tx_url}\n"
+        + (f"  Market : {v.market_url}\n" if v.market_url else "")
         + f"{'*'*70}"
     )
 
 
 def _format_alert(trade: dict, result: detector.ScoreResult) -> str:
-    address = trade.get("proxyWallet", "")
-    question = trade.get("title", trade.get("conditionId", "unknown market"))
-    slug = trade.get("slug", "")
-    price = float(trade.get("price", 0))
-    size = float(trade.get("size", 0))
-    usdc_spent = price * size
-    potential_profit = size - usdc_spent  # profit if resolves YES at $1
-    tx_hash = trade.get("transactionHash", "n/a")
-    reasons_str = ", ".join(result.reasons)
-    short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
-
-    wallet_url = f"https://polygonscan.com/address/{address}"
-    tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
-    market_url = f"https://polymarket.com/event/{slug}" if slug else ""
-
+    v = _alert_view(trade, result)
     return (
         f"\n{'='*70}\n"
-        f"[ALERT] Score={result.score}  Wallet={short_addr}\n"
-        f"  Market : {question}\n"
-        f"  Reasons: {reasons_str}\n"
-        f"  Trade  : {size:,.0f} YES shares @ ${price:.3f}  "
-        f"| USDC spent: ${usdc_spent:,.0f}  "
-        f"| Potential profit: ${potential_profit:,.0f}\n"
-        f"  Wallet : {wallet_url}\n"
-        f"  tx     : {tx_url}\n"
-        + (f"  Market : {market_url}\n" if market_url else "")
+        f"[ALERT] Score={v.score}  Wallet={v.short_addr}\n"
+        f"  Market : {v.question}\n"
+        f"  Reasons: {v.reasons_str}\n"
+        f"  Trade  : {v.size:,.0f} YES shares @ ${v.price:.3f}  "
+        f"| USDC spent: ${v.usdc_spent:,.0f}  "
+        f"| Potential profit: ${v.potential_profit:,.0f}\n"
+        f"  Wallet : {v.wallet_url}\n"
+        f"  tx     : {v.tx_url}\n"
+        + (f"  Market : {v.market_url}\n" if v.market_url else "")
         + f"{'='*70}"
     )
 
@@ -368,7 +404,7 @@ def run_scan() -> None:
         should_refresh = cached is None or (scan_start - (cached["updated_at"] or 0)) > 3600
 
         if should_refresh:
-            poly_count, poly_markets = polymarket.get_wallet_trade_history(address)
+            poly_count, poly_markets = polymarket.get_wallet_trade_history(address, exclude_tx_hash=tx_hash)
             first_tx_ts = polygon.get_wallet_first_tx(address)
             last_funded_ts = polygon.get_wallet_last_usdc_in(address)
             database.upsert_wallet(
@@ -408,7 +444,7 @@ def run_scan() -> None:
             )
             question = market_row.get("question", condition_id) if market_row else condition_id
             if not private_alert_output:
-                short_wallets = [w[:6] + "..." + w[-4:] for w in cluster_wallets]
+                short_wallets = [_short_addr(w) for w in cluster_wallets]
                 print(
                     f"\n{'!'*70}\n"
                     f"[CLUSTER] {len(cluster_wallets)} wallets flagged on same market "
@@ -464,36 +500,24 @@ def run_scan() -> None:
     _write_step_summary(alerts_data, clusters_data, watchlist_hits_data)
 
     for trade, result in alerts_data:
-        address = trade.get("proxyWallet", "")
-        short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
-        tx_hash = trade.get("transactionHash", "n/a")
-        question = trade.get("title", trade.get("conditionId", "unknown market"))
-        slug = trade.get("slug", "")
-        price = float(trade.get("price", 0))
-        size = float(trade.get("size", 0))
-        usdc_spent = price * size
-        potential_profit = size - usdc_spent
-        reasons_str = ", ".join(result.reasons)
-        wallet_url = f"https://polygonscan.com/address/{address}"
-        tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
-        market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+        v = _alert_view(trade, result)
         body = (
-            f"**Score:** {result.score}  \n"
-            f"**Wallet:** [{short_addr}]({wallet_url})  \n"
-            f"**Signals:** `{reasons_str}`  \n\n"
+            f"**Score:** {v.score}  \n"
+            f"**Wallet:** [{v.short_addr}]({v.wallet_url})  \n"
+            f"**Signals:** `{v.reasons_str}`  \n\n"
             f"| Field | Value |\n|---|---|\n"
-            f"| Market | {question} |\n"
-            f"| Shares | {size:,.0f} YES @ ${price:.3f} |\n"
-            f"| USDC spent | ${usdc_spent:,.0f} |\n"
-            f"| Potential profit | ${potential_profit:,.0f} |\n"
-            f"| Transaction | [{tx_hash[:16]}...]({tx_url}) |\n"
-            + (f"| Polymarket | [View market]({market_url}) |\n" if market_url else "")
+            f"| Market | {v.question} |\n"
+            f"| Shares | {v.size:,.0f} YES @ ${v.price:.3f} |\n"
+            f"| USDC spent | ${v.usdc_spent:,.0f} |\n"
+            f"| Potential profit | ${v.potential_profit:,.0f} |\n"
+            f"| Transaction | [{v.tx_hash[:16]}...]({v.tx_url}) |\n"
+            + (f"| Polymarket | [View market]({v.market_url}) |\n" if v.market_url else "")
         )
-        _create_github_issue(f"[Alert] Score={result.score} {short_addr} — {question}", body)
+        _create_github_issue(f"[Alert] Score={v.score} {v.short_addr} — {v.question}", body)
 
     for question, wallets in clusters_data:
         wallet_links = "\n".join(
-            f"- [{w[:6]}...{w[-4:]}](https://polygonscan.com/address/{w})" for w in wallets
+            f"- [{_short_addr(w)}](https://polygonscan.com/address/{w})" for w in wallets
         )
         body = (
             f"**{len(wallets)} flagged wallets** traded the same market within "
@@ -504,30 +528,17 @@ def run_scan() -> None:
         _create_github_issue(f"[Cluster] {len(wallets)} wallets — {question}", body)
 
     for trade in watchlist_hits_data:
-        address = trade.get("_watchlist_address") or trade.get("proxyWallet", "")
-        label = trade.get("_watchlist_label", "known insider")
-        short_addr = address[:6] + "..." + address[-4:] if len(address) > 10 else address
-        tx_hash = trade.get("transactionHash", "n/a")
-        question = trade.get("title", trade.get("conditionId", "unknown market"))
-        slug = trade.get("slug", "")
-        price = float(trade.get("price", 0))
-        size = float(trade.get("size", 0))
-        usdc_spent = price * size
-        side = trade.get("side", "?")
-        outcome = trade.get("outcome", "?")
-        wallet_url = f"https://polygonscan.com/address/{address}"
-        tx_url = f"https://polygonscan.com/tx/{tx_hash}" if tx_hash != "n/a" else tx_hash
-        market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+        v = _watchlist_hit_view(trade)
         body = (
-            f"**Known insider wallet active:** [{short_addr}]({wallet_url}) — {label}  \n\n"
+            f"**Known insider wallet active:** [{v.short_addr}]({v.wallet_url}) — {v.label}  \n\n"
             f"| Field | Value |\n|---|---|\n"
-            f"| Market | {question} |\n"
-            f"| Shares | {size:,.0f} {outcome} @ ${price:.3f} ({side}) |\n"
-            f"| USDC spent | ${usdc_spent:,.0f} |\n"
-            f"| Transaction | [{tx_hash[:16]}...]({tx_url}) |\n"
-            + (f"| Polymarket | [View market]({market_url}) |\n" if market_url else "")
+            f"| Market | {v.question} |\n"
+            f"| Shares | {v.size:,.0f} {v.outcome} @ ${v.price:.3f} ({v.side}) |\n"
+            f"| USDC spent | ${v.usdc_spent:,.0f} |\n"
+            f"| Transaction | [{v.tx_hash[:16]}...]({v.tx_url}) |\n"
+            + (f"| Polymarket | [View market]({v.market_url}) |\n" if v.market_url else "")
         )
-        _create_github_issue(f"[Watchlist] {short_addr} — {question}", body)
+        _create_github_issue(f"[Watchlist] {v.short_addr} — {v.question}", body)
 
     retention_cutoff = scan_start - config.WATCHLIST_RETENTION_DAYS * 86400
     pruned_hits = database.prune_watchlist_hits(retention_cutoff)
